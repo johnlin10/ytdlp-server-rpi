@@ -2,14 +2,8 @@ const form = document.getElementById("download-form");
 const urlInput = document.getElementById("url-input");
 const submitBtn = document.getElementById("submit-btn");
 
-const jobStatus = document.getElementById("job-status");
-const jobTitle = document.getElementById("job-title");
-const jobMeta = document.getElementById("job-meta");
-const progressFill = document.getElementById("progress-fill");
-
+const jobsContainer = document.getElementById("jobs");
 const historyLog = document.getElementById("history-log");
-
-let pollTimer = null;
 
 function fmtBytes(bytes) {
   if (!bytes) return "0 MB";
@@ -18,49 +12,91 @@ function fmtBytes(bytes) {
   return mb.toFixed(1) + " MB";
 }
 
-function showJob(title) {
-  jobStatus.classList.remove("hidden");
-  jobTitle.textContent = title;
-  progressFill.style.width = "0%";
-  jobMeta.textContent = "準備中…";
+// 觸發瀏覽器把檔案下載到使用者的裝置
+function triggerBrowserDownload(videoId) {
+  const a = document.createElement("a");
+  a.href = `/api/file/${videoId}`;
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
-function updateJobUI(job) {
-  if (job.status === "downloading") {
-    progressFill.style.width = `${job.percent || 0}%`;
-    jobMeta.textContent = `下載中… ${job.percent || 0}%`;
-  } else if (job.status === "processing") {
-    progressFill.style.width = "100%";
-    jobMeta.textContent = "處理中（合併音軌/轉檔）…";
-  } else if (job.status === "done") {
-    progressFill.style.width = "100%";
-    jobMeta.textContent = "完成，已加入下載紀錄";
-  } else if (job.status === "error") {
-    jobMeta.innerHTML = `<span class="error-text">失敗：${job.error}</span>`;
+// ---------- 進度卡片（支援多個並行任務）----------
+function createJobCard(title) {
+  const card = document.createElement("div");
+  card.className = "job-card";
+  card.innerHTML = `
+    <div class="job-title"></div>
+    <div class="progress-track"><div class="progress-fill"></div></div>
+    <div class="job-meta">準備中…</div>
+  `;
+  card.querySelector(".job-title").textContent = title;
+  jobsContainer.prepend(card);
+  return card;
+}
+
+function setCardTitle(card, title) {
+  card.querySelector(".job-title").textContent = title;
+}
+
+function setCardMeta(card, text, isError = false) {
+  const meta = card.querySelector(".job-meta");
+  if (isError) {
+    meta.innerHTML = `<span class="error-text">${text}</span>`;
   } else {
-    jobMeta.textContent = "準備中…";
+    meta.textContent = text;
   }
 }
 
-async function pollJob(jobId) {
-  clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
+function setCardProgress(card, percent) {
+  card.querySelector(".progress-fill").style.width = `${percent}%`;
+}
+
+function retireCard(card, delay = 4000) {
+  setTimeout(() => {
+    card.classList.add("retiring");
+    setTimeout(() => card.remove(), 400);
+  }, delay);
+}
+
+function updateCard(card, job) {
+  if (job.status === "downloading") {
+    setCardProgress(card, job.percent || 0);
+    setCardMeta(card, `下載中… ${job.percent || 0}%`);
+  } else if (job.status === "processing") {
+    setCardProgress(card, 100);
+    setCardMeta(card, "處理中（合併音軌/轉檔）…");
+  } else if (job.status === "done") {
+    setCardProgress(card, 100);
+    setCardMeta(card, "完成，開始下載到你的裝置…");
+  } else if (job.status === "error") {
+    setCardMeta(card, `失敗：${job.error}`, true);
+  } else {
+    setCardMeta(card, "準備中…");
+  }
+}
+
+// 每個任務各自輪詢，互不干擾，可同時進行多筆下載
+function pollJob(card, jobId) {
+  const timer = setInterval(async () => {
     try {
       const res = await fetch(`/api/status/${jobId}`);
       if (!res.ok) throw new Error("查無此工作");
       const job = await res.json();
-      updateJobUI(job);
+      updateCard(card, job);
 
-      if (job.status === "done" || job.status === "error") {
-        clearInterval(pollTimer);
-        submitBtn.disabled = false;
-        if (job.status === "done") {
-          await loadHistory();
-        }
+      if (job.status === "done") {
+        clearInterval(timer);
+        triggerBrowserDownload(job.video_id);
+        await loadHistory();
+        retireCard(card);
+      } else if (job.status === "error") {
+        clearInterval(timer);
       }
     } catch (e) {
-      clearInterval(pollTimer);
-      submitBtn.disabled = false;
+      clearInterval(timer);
+      setCardMeta(card, "連線中斷，無法取得進度", true);
     }
   }, 1000);
 }
@@ -70,8 +106,10 @@ form.addEventListener("submit", async (e) => {
   const url = urlInput.value.trim();
   if (!url) return;
 
+  // 只在送出請求（解析影片資訊）期間短暫鎖住按鈕，避免重複送出同一筆；
+  // 拿到 job 後立即解鎖，讓你能接著貼下一個網址並行下載。
   submitBtn.disabled = true;
-  showJob("解析影片資訊中…");
+  const card = createJobCard("解析影片資訊中…");
 
   try {
     const res = await fetch("/api/download", {
@@ -81,28 +119,30 @@ form.addEventListener("submit", async (e) => {
     });
 
     if (!res.ok) {
-      const err = await res.json();
-      jobMeta.innerHTML = `<span class="error-text">${err.detail || "下載請求失敗"}</span>`;
+      const err = await res.json().catch(() => ({}));
+      setCardMeta(card, err.detail || "下載請求失敗", true);
       submitBtn.disabled = false;
       return;
     }
 
     const data = await res.json();
+    submitBtn.disabled = false;
+    urlInput.value = "";
 
     if (data.status === "exists") {
-      jobTitle.textContent = data.title;
-      progressFill.style.width = "100%";
-      jobMeta.textContent = "此影片先前已下載過，可直接於下方紀錄重新下載";
-      submitBtn.disabled = false;
+      setCardTitle(card, data.title);
+      setCardProgress(card, 100);
+      setCardMeta(card, "此影片先前已下載過，開始下載到你的裝置…");
+      triggerBrowserDownload(data.video_id);
       await loadHistory();
+      retireCard(card);
       return;
     }
 
-    jobTitle.textContent = data.title;
-    urlInput.value = "";
-    pollJob(data.job_id);
+    setCardTitle(card, data.title);
+    pollJob(card, data.job_id);
   } catch (err) {
-    jobMeta.innerHTML = `<span class="error-text">連線失敗，請確認伺服器是否運作中</span>`;
+    setCardMeta(card, "連線失敗，請確認伺服器是否運作中", true);
     submitBtn.disabled = false;
   }
 });
@@ -128,12 +168,32 @@ function renderHistory(items) {
           <div class="log-actions">
             <a href="${item.url}" target="_blank" rel="noopener">原始連結</a>
             <a href="/api/file/${item.video_id}" download>重新下載</a>
+            <button class="del-btn" data-id="${item.video_id}" title="刪除紀錄與影片檔案">刪除</button>
           </div>
         </div>
       `;
     })
     .join("");
 }
+
+// 事件委派：處理歷史清單中的刪除按鈕
+historyLog.addEventListener("click", async (e) => {
+  const btn = e.target.closest(".del-btn");
+  if (!btn) return;
+
+  const videoId = btn.dataset.id;
+  if (!confirm("確定要刪除這筆紀錄與影片檔案嗎？此動作無法復原。")) return;
+
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/history/${videoId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("刪除失敗");
+    await loadHistory();
+  } catch (err) {
+    alert("刪除失敗，請稍後再試。");
+    btn.disabled = false;
+  }
+});
 
 async function loadHistory() {
   try {

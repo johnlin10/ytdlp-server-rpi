@@ -109,6 +109,7 @@ mp4 原始檔會持續累積在 `backend/downloads/`，請留意 SD 卡或外接
 | GET    | `/api/status/{job_id}`   | 查詢下載進度                                          |
 | GET    | `/api/history`           | 取得歷史下載清單                                      |
 | GET    | `/api/file/{video_id}`   | 下載/重新下載已存在的 mp4 檔案                        |
+| DELETE | `/api/history/{video_id}`| 刪除一筆歷史紀錄，並移除硬碟上的影片檔案              |
 
 ## 授權
 

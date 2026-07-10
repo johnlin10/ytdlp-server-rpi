@@ -222,5 +222,31 @@ def get_file(video_id: str):
     )
 
 
+@app.delete("/api/history/{video_id}")
+def delete_history(video_id: str):
+    """刪除一筆歷史紀錄，並移除硬碟上的影片檔案"""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM downloads WHERE video_id = ?", (video_id,)
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="找不到此紀錄")
+
+    # 先刪檔案，再刪紀錄；檔案不存在時視為已清除，繼續刪紀錄
+    filepath = DOWNLOAD_DIR / row["filename"]
+    if filepath.exists():
+        try:
+            filepath.unlink()
+        except OSError as e:  # noqa: BLE001
+            conn.close()
+            raise HTTPException(status_code=500, detail=f"刪除檔案失敗：{e}")
+
+    conn.execute("DELETE FROM downloads WHERE video_id = ?", (video_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "deleted", "video_id": video_id}
+
+
 # 靜態前端（放在最後掛載，避免蓋掉 /api 路由）
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

@@ -98,14 +98,20 @@ h1 {
   cursor: not-allowed;
 }
 
-.job-status {
+.jobs {
+  display: flex;
+  flex-direction: column;
+}
+
+.job-card {
   margin-top: 18px;
   padding-top: 18px;
   border-top: 1px solid var(--border);
+  transition: opacity 0.4s ease;
 }
 
-.job-status.hidden {
-  display: none;
+.job-card.retiring {
+  opacity: 0;
 }
 
 .job-title {
@@ -214,6 +220,28 @@ h1 {
 .log-actions a:hover {
   background: var(--accent);
   color: #0c1210;
+}
+
+.log-actions button.del-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--danger);
+  background: none;
+  border: 1px solid var(--danger);
+  border-radius: 4px;
+  padding: 5px 8px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.log-actions button.del-btn:hover {
+  background: var(--danger);
+  color: #0c1210;
+}
+
+.log-actions button.del-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .error-text {
