@@ -316,3 +316,102 @@ h1 {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ---------- storage / disk usage ---------- */
+.storage {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.storage-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.storage-label {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.storage-figures {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.storage-bar {
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow-x: auto;
+  color: var(--text-dim);
+}
+
+.storage-bar .g-mine { color: var(--accent); }
+.storage-bar .g-other { color: var(--text); }
+.storage-bar .g-free { color: var(--accent-dim); }
+
+.storage-bar .g-legend {
+  margin-left: 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ---------- responsive / small screens ---------- */
+@media (max-width: 600px) {
+  body {
+    padding: 16px 10px 40px;
+    font-size: 13.5px;
+  }
+
+  .term-body {
+    padding: 18px 14px 24px;
+  }
+
+  .term-name {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  h1 {
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Let the history rows breathe: thumb + title on top, actions below. */
+  .log-entry {
+    flex-wrap: wrap;
+    padding-left: 8px;
+  }
+
+  .log-body {
+    flex: 1 1 calc(100% - 72px);
+  }
+
+  .log-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-top: 2px;
+  }
+
+  .log-actions a,
+  .log-actions button {
+    padding: 5px 8px;
+  }
+
+  .storage-bar .g-legend {
+    display: block;
+    margin-left: 0;
+    margin-top: 4px;
+  }
+}

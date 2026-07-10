@@ -30,9 +30,9 @@
         <form id="download-form" class="input-row">
           <span class="prompt">$</span>
           <input
-            type="url"
+            type="text"
             id="url-input"
-            placeholder="paste a youtube url and press enter"
+            placeholder="url(s), comma-separated"
             autocomplete="off"
             spellcheck="false"
             required
@@ -45,6 +45,15 @@
 
       <section class="log-section">
         <p class="comment"># history · ls ~/downloads</p>
+
+        <div id="storage" class="storage">
+          <div class="storage-head">
+            <span class="storage-label">df -h ~/downloads</span>
+            <span class="storage-figures" id="storage-figures">—</span>
+          </div>
+          <div class="storage-bar" id="storage-bar"></div>
+        </div>
+
         <div id="history-log" class="history-log">
           <p class="empty-state">no downloads yet — paste a url above to begin.</p>
         </div>

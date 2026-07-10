@@ -90,6 +90,7 @@ function pollJob(card, jobId) {
         clearInterval(timer);
         triggerBrowserDownload(job.video_id);
         await loadHistory();
+        loadStorage();
         retireCard(card);
       } else if (job.status === "error") {
         clearInterval(timer);
@@ -101,15 +102,9 @@ function pollJob(card, jobId) {
   }, 1000);
 }
 
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const url = urlInput.value.trim();
-  if (!url) return;
-
-  // Lock the button only while the request (metadata parse) is in flight, to
-  // avoid double-submitting the same url; unlock as soon as we have a job so
-  // you can immediately queue another and download in parallel.
-  submitBtn.disabled = true;
+// Submit a single URL: spins up its own job card and polls independently, so
+// every url in a batch downloads in parallel.
+async function submitOne(url) {
   const card = createJobCard("resolving video info…");
 
   try {
@@ -122,19 +117,17 @@ form.addEventListener("submit", async (e) => {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       setCardMeta(card, `<span class="error-text">${err.detail || "request failed"}</span>`);
-      submitBtn.disabled = false;
       return;
     }
 
     const data = await res.json();
-    submitBtn.disabled = false;
-    urlInput.value = "";
 
     if (data.status === "exists") {
       setCardTitle(card, data.title);
       setCardMeta(card, "already downloaded · saving to your device");
       triggerBrowserDownload(data.video_id);
       await loadHistory();
+      loadStorage();
       retireCard(card);
       return;
     }
@@ -143,8 +136,36 @@ form.addEventListener("submit", async (e) => {
     pollJob(card, data.job_id);
   } catch (err) {
     setCardMeta(card, `<span class="error-text">connection failed — is the server running?</span>`);
-    submitBtn.disabled = false;
   }
+}
+
+// Split on commas (and newlines, for convenience) into a de-duplicated list.
+function parseUrls(raw) {
+  const seen = new Set();
+  return raw
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter((s) => {
+      if (!s || seen.has(s)) return false;
+      seen.add(s);
+      return true;
+    });
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const urls = parseUrls(urlInput.value);
+  if (!urls.length) return;
+
+  // Lock the button only while we kick off the requests, then clear the input
+  // and unlock so more can be queued right away.
+  submitBtn.disabled = true;
+  urlInput.value = "";
+
+  // Fire them all off; each manages its own card and polling.
+  urls.forEach((url) => submitOne(url));
+
+  submitBtn.disabled = false;
 });
 
 function renderHistory(items) {
@@ -189,6 +210,7 @@ historyLog.addEventListener("click", async (e) => {
     const res = await fetch(`/api/history/${videoId}`, { method: "DELETE" });
     if (!res.ok) throw new Error("delete failed");
     await loadHistory();
+    loadStorage();
   } catch (err) {
     alert("Delete failed. Please try again.");
     btn.disabled = false;
@@ -205,4 +227,48 @@ async function loadHistory() {
   }
 }
 
+// ---------- storage / disk usage ----------
+const storageFigures = document.getElementById("storage-figures");
+const storageBar = document.getElementById("storage-bar");
+
+// A block-character gauge showing the disk usage, with the slice taken up by
+// our own downloads highlighted, e.g. [####----················]
+function storageGauge(usedFrac, downloadsFrac) {
+  const width = 30;
+  const used = Math.round(clampPct(usedFrac * 100) / 100 * width);
+  const mine = Math.min(used, Math.round(clampPct(downloadsFrac * 100) / 100 * width));
+  const other = used - mine;
+  const free = width - used;
+  return (
+    `<span class="g-mine">${"█".repeat(mine)}</span>` +
+    `<span class="g-other">${"▓".repeat(other)}</span>` +
+    `<span class="g-free">${"░".repeat(free)}</span>`
+  );
+}
+
+function renderStorage(s) {
+  const total = s.disk_total || 0;
+  const usedFrac = total ? s.disk_used / total : 0;
+  const downloadsFrac = total ? s.downloads_bytes / total : 0;
+  const pct = Math.round(usedFrac * 100);
+
+  storageFigures.textContent =
+    `downloads ${fmtBytes(s.downloads_bytes)} · ` +
+    `disk ${fmtBytes(s.disk_used)} / ${fmtBytes(s.disk_total)} (${pct}%)`;
+  storageBar.innerHTML =
+    `[${storageGauge(usedFrac, downloadsFrac)}] ` +
+    `<span class="g-legend">█ dl · ▓ other · ░ free</span>`;
+}
+
+async function loadStorage() {
+  try {
+    const res = await fetch("/api/storage");
+    if (!res.ok) return;
+    renderStorage(await res.json());
+  } catch (e) {
+    // fail silently
+  }
+}
+
 loadHistory();
+loadStorage();

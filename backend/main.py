@@ -6,6 +6,7 @@ paste a YouTube URL -> yt-dlp downloads an mp4 -> the file stays on the device
 -> the history list lets you re-download it without calling yt-dlp again.
 """
 
+import shutil
 import sqlite3
 import threading
 import time
@@ -194,6 +195,28 @@ def status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@app.get("/api/storage")
+def storage():
+    """Report how much space the downloads use and the state of the disk."""
+    # Sum the sizes of the files we actually have on disk (not the DB column,
+    # which can drift if a file was removed out of band).
+    downloads_bytes = 0
+    for f in DOWNLOAD_DIR.glob("*"):
+        if f.is_file():
+            try:
+                downloads_bytes += f.stat().st_size
+            except OSError:
+                pass
+
+    usage = shutil.disk_usage(DOWNLOAD_DIR)
+    return {
+        "downloads_bytes": downloads_bytes,
+        "disk_total": usage.total,
+        "disk_used": usage.used,
+        "disk_free": usage.free,
+    }
 
 
 @app.get("/api/history")

@@ -12,7 +12,9 @@ Python application and runs on any Linux / macOS system with Python 3 and ffmpeg
 
 - Web UI: paste a URL, watch live download progress, and see finished files in the history list.
 - Deduplication: keyed by the video's `video_id`, so an already-downloaded video is returned from disk instead of being downloaded again.
-- Parallel downloads: submit several URLs at once; each runs in its own background thread with its own progress card.
+- Parallel / batch downloads: paste several URLs at once separated by commas (or newlines); each runs in its own background thread with its own progress card.
+- Storage gauge: the history view shows how much space your downloads use against the total disk, with a terminal-style usage bar.
+- Responsive UI: the layout adapts to phones and narrow screens.
 - Auto-save: when a download finishes, the browser is prompted to save the mp4 to your device.
 - History: SQLite stores the title, original URL, filename, size, thumbnail and download time, with one-click delete (record + file).
 - No build step: the frontend is plain HTML/CSS/JS served directly by FastAPI, well suited to running for long periods on a Pi.
@@ -120,6 +122,7 @@ the service directly.
 | POST   | `/api/download`           | Send `{ "url": "..." }`; starts a download or returns an existing record |
 | GET    | `/api/status/{job_id}`    | Query download progress                                 |
 | GET    | `/api/history`            | Get the download history list                           |
+| GET    | `/api/storage`            | Report downloads size and disk total/used/free          |
 | GET    | `/api/file/{video_id}`    | Download / re-download an existing mp4 file              |
 | DELETE | `/api/history/{video_id}` | Delete a history record and remove the video file       |
 
