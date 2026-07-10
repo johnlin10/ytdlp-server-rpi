@@ -27,10 +27,10 @@ sudo apt install -y python3-venv python3-pip ffmpeg
 
 ### 2. 傳輸專案並建立虛擬環境
 
-將整個 `ytdlp-server` 資料夾放到 `/home/pi/ytdlp-server`（可用 `scp` 或隨身碟）：
+將整個 `ytdlp-server-rpi` 資料夾放到 `/home/pi/ytdlp-server-rpi`（可用 `scp` 或隨身碟）：
 
 ```bash
-cd /home/pi/ytdlp-server
+cd /home/pi/ytdlp-server-rpi
 python3 -m venv venv
 source venv/bin/activate
 pip install -r backend/requirements.txt
@@ -53,17 +53,17 @@ cd backend
 ### 4. 設定開機自動啟動（systemd）
 
 ```bash
-sudo cp /home/pi/ytdlp-server/ytdlp-server.service /etc/systemd/system/
+sudo cp /home/pi/ytdlp-server-rpi/ytdlp-server-rpi.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now ytdlp-server
+sudo systemctl enable --now ytdlp-server-rpi
 ```
 
 之後可用以下指令管理：
 
 ```bash
-sudo systemctl status ytdlp-server   # 查看狀態
-sudo systemctl restart ytdlp-server  # 重啟
-journalctl -u ytdlp-server -f        # 查看即時日誌
+sudo systemctl status ytdlp-server-rpi   # 查看狀態
+sudo systemctl restart ytdlp-server-rpi  # 重啟
+journalctl -u ytdlp-server-rpi -f        # 查看即時日誌
 ```
 
 ## 重要維運提醒
@@ -71,9 +71,9 @@ journalctl -u ytdlp-server -f        # 查看即時日誌
 - **yt-dlp 需要定期更新**：YouTube 常改動介面導致 yt-dlp 失效。
   建議每隔一兩週手動更新一次：
   ```bash
-  source /home/pi/ytdlp-server/venv/bin/activate
+  source /home/pi/ytdlp-server-rpi/venv/bin/activate
   pip install -U yt-dlp
-  sudo systemctl restart ytdlp-server
+  sudo systemctl restart ytdlp-server-rpi
   ```
 - **儲存空間**：mp4 原始檔會持續累積在 `backend/downloads/`，
   請留意 SD 卡或外接硬碟的剩餘空間，必要時手動清理較舊的檔案
