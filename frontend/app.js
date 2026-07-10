@@ -12,7 +12,19 @@ function fmtBytes(bytes) {
   return mb.toFixed(1) + " MB";
 }
 
-// 觸發瀏覽器把檔案下載到使用者的裝置
+function clampPct(p) {
+  return Math.max(0, Math.min(100, Math.round(p || 0)));
+}
+
+// ASCII progress bar, e.g. [██████████░░░░░░░░░░░░]
+function asciiBar(percent) {
+  const width = 22;
+  const p = clampPct(percent);
+  const filled = Math.round((p / 100) * width);
+  return `[${"█".repeat(filled)}${"░".repeat(width - filled)}]`;
+}
+
+// Ask the browser to download the mp4 to the user's device
 function triggerBrowserDownload(videoId) {
   const a = document.createElement("a");
   a.href = `/api/file/${videoId}`;
@@ -22,14 +34,13 @@ function triggerBrowserDownload(videoId) {
   a.remove();
 }
 
-// ---------- 進度卡片（支援多個並行任務）----------
+// ---------- job cards (support multiple concurrent downloads) ----------
 function createJobCard(title) {
   const card = document.createElement("div");
   card.className = "job-card";
   card.innerHTML = `
     <div class="job-title"></div>
-    <div class="progress-track"><div class="progress-fill"></div></div>
-    <div class="job-meta">準備中…</div>
+    <div class="job-meta">booting…</div>
   `;
   card.querySelector(".job-title").textContent = title;
   jobsContainer.prepend(card);
@@ -40,17 +51,8 @@ function setCardTitle(card, title) {
   card.querySelector(".job-title").textContent = title;
 }
 
-function setCardMeta(card, text, isError = false) {
-  const meta = card.querySelector(".job-meta");
-  if (isError) {
-    meta.innerHTML = `<span class="error-text">${text}</span>`;
-  } else {
-    meta.textContent = text;
-  }
-}
-
-function setCardProgress(card, percent) {
-  card.querySelector(".progress-fill").style.width = `${percent}%`;
+function setCardMeta(card, html) {
+  card.querySelector(".job-meta").innerHTML = html;
 }
 
 function retireCard(card, delay = 4000) {
@@ -62,27 +64,25 @@ function retireCard(card, delay = 4000) {
 
 function updateCard(card, job) {
   if (job.status === "downloading") {
-    setCardProgress(card, job.percent || 0);
-    setCardMeta(card, `下載中… ${job.percent || 0}%`);
+    const p = clampPct(job.percent);
+    setCardMeta(card, `downloading <span class="bar">${asciiBar(p)}</span> ${p}%`);
   } else if (job.status === "processing") {
-    setCardProgress(card, 100);
-    setCardMeta(card, "處理中（合併音軌/轉檔）…");
+    setCardMeta(card, "processing · merging audio/video…");
   } else if (job.status === "done") {
-    setCardProgress(card, 100);
-    setCardMeta(card, "完成，開始下載到你的裝置…");
+    setCardMeta(card, "done · saving to your device");
   } else if (job.status === "error") {
-    setCardMeta(card, `失敗：${job.error}`, true);
+    setCardMeta(card, `<span class="error-text">error: ${job.error}</span>`);
   } else {
-    setCardMeta(card, "準備中…");
+    setCardMeta(card, "booting…");
   }
 }
 
-// 每個任務各自輪詢，互不干擾，可同時進行多筆下載
+// Each job polls on its own so downloads run independently in parallel
 function pollJob(card, jobId) {
   const timer = setInterval(async () => {
     try {
       const res = await fetch(`/api/status/${jobId}`);
-      if (!res.ok) throw new Error("查無此工作");
+      if (!res.ok) throw new Error("job not found");
       const job = await res.json();
       updateCard(card, job);
 
@@ -96,7 +96,7 @@ function pollJob(card, jobId) {
       }
     } catch (e) {
       clearInterval(timer);
-      setCardMeta(card, "連線中斷，無法取得進度", true);
+      setCardMeta(card, `<span class="error-text">connection lost — cannot read progress</span>`);
     }
   }, 1000);
 }
@@ -106,10 +106,11 @@ form.addEventListener("submit", async (e) => {
   const url = urlInput.value.trim();
   if (!url) return;
 
-  // 只在送出請求（解析影片資訊）期間短暫鎖住按鈕，避免重複送出同一筆；
-  // 拿到 job 後立即解鎖，讓你能接著貼下一個網址並行下載。
+  // Lock the button only while the request (metadata parse) is in flight, to
+  // avoid double-submitting the same url; unlock as soon as we have a job so
+  // you can immediately queue another and download in parallel.
   submitBtn.disabled = true;
-  const card = createJobCard("解析影片資訊中…");
+  const card = createJobCard("resolving video info…");
 
   try {
     const res = await fetch("/api/download", {
@@ -120,7 +121,7 @@ form.addEventListener("submit", async (e) => {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      setCardMeta(card, err.detail || "下載請求失敗", true);
+      setCardMeta(card, `<span class="error-text">${err.detail || "request failed"}</span>`);
       submitBtn.disabled = false;
       return;
     }
@@ -131,8 +132,7 @@ form.addEventListener("submit", async (e) => {
 
     if (data.status === "exists") {
       setCardTitle(card, data.title);
-      setCardProgress(card, 100);
-      setCardMeta(card, "此影片先前已下載過，開始下載到你的裝置…");
+      setCardMeta(card, "already downloaded · saving to your device");
       triggerBrowserDownload(data.video_id);
       await loadHistory();
       retireCard(card);
@@ -142,14 +142,14 @@ form.addEventListener("submit", async (e) => {
     setCardTitle(card, data.title);
     pollJob(card, data.job_id);
   } catch (err) {
-    setCardMeta(card, "連線失敗，請確認伺服器是否運作中", true);
+    setCardMeta(card, `<span class="error-text">connection failed — is the server running?</span>`);
     submitBtn.disabled = false;
   }
 });
 
 function renderHistory(items) {
   if (!items.length) {
-    historyLog.innerHTML = `<p class="empty-state">尚無下載紀錄。貼上網址後開始第一筆下載。</p>`;
+    historyLog.innerHTML = `<p class="empty-state">no downloads yet — paste a url above to begin.</p>`;
     return;
   }
 
@@ -163,12 +163,12 @@ function renderHistory(items) {
           ${thumb}
           <div class="log-body">
             <div class="log-title" title="${item.title}">${item.title}</div>
-            <div class="log-timestamp">${item.downloaded_at} · ${fmtBytes(item.filesize)}</div>
+            <div class="log-meta">${item.downloaded_at} · ${fmtBytes(item.filesize)}</div>
           </div>
           <div class="log-actions">
-            <a href="${item.url}" target="_blank" rel="noopener">原始連結</a>
-            <a href="/api/file/${item.video_id}" download>重新下載</a>
-            <button class="del-btn" data-id="${item.video_id}" title="刪除紀錄與影片檔案">刪除</button>
+            <a href="${item.url}" target="_blank" rel="noopener">[ src ]</a>
+            <a href="/api/file/${item.video_id}" download>[ save ]</a>
+            <button class="del-btn" data-id="${item.video_id}" title="delete record and file">[ rm ]</button>
           </div>
         </div>
       `;
@@ -176,21 +176,21 @@ function renderHistory(items) {
     .join("");
 }
 
-// 事件委派：處理歷史清單中的刪除按鈕
+// Event delegation: handle the delete buttons in the history list
 historyLog.addEventListener("click", async (e) => {
   const btn = e.target.closest(".del-btn");
   if (!btn) return;
 
   const videoId = btn.dataset.id;
-  if (!confirm("確定要刪除這筆紀錄與影片檔案嗎？此動作無法復原。")) return;
+  if (!confirm("Delete this record and its video file? This cannot be undone.")) return;
 
   btn.disabled = true;
   try {
     const res = await fetch(`/api/history/${videoId}`, { method: "DELETE" });
-    if (!res.ok) throw new Error("刪除失敗");
+    if (!res.ok) throw new Error("delete failed");
     await loadHistory();
   } catch (err) {
-    alert("刪除失敗，請稍後再試。");
+    alert("Delete failed. Please try again.");
     btn.disabled = false;
   }
 });
@@ -201,7 +201,7 @@ async function loadHistory() {
     const items = await res.json();
     renderHistory(items);
   } catch (e) {
-    // 靜默失敗，保留現有畫面
+    // fail silently, keep the current view
   }
 }
 

@@ -1,41 +1,58 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>yt-dlp 家庭下載站</title>
+  <title>ytdlp-server-rpi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
-  <main class="wrap">
-    <header class="head">
-      <p class="eyebrow">LOCAL NETWORK · RASPBERRY PI</p>
-      <h1>yt-dlp 家庭下載站</h1>
-    </header>
+  <main class="term">
+    <div class="term-bar">
+      <span class="dot dot-red"></span>
+      <span class="dot dot-amber"></span>
+      <span class="dot dot-green"></span>
+      <span class="term-name">tdkrp@ytdlp-server-rpi: ~/downloads</span>
+    </div>
 
-    <section class="panel">
-      <form id="download-form" class="input-row">
-        <input
-          type="url"
-          id="url-input"
-          placeholder="貼上 YouTube 影片網址…"
-          autocomplete="off"
-          required
-        />
-        <button type="submit" id="submit-btn">下載</button>
-      </form>
+    <div class="term-body">
+      <header class="head">
+        <h1>ytdlp-server-rpi<span class="cursor"></span></h1>
+        <p class="comment"># yt-dlp download server · local network / raspberry pi</p>
+      </header>
 
-      <div id="jobs" class="jobs"></div>
-    </section>
+      <section class="panel">
+        <form id="download-form" class="input-row">
+          <span class="prompt">$</span>
+          <input
+            type="url"
+            id="url-input"
+            placeholder="paste a youtube url and press enter"
+            autocomplete="off"
+            spellcheck="false"
+            required
+          />
+          <button type="submit" id="submit-btn">run</button>
+        </form>
 
-    <section class="log-section">
-      <p class="eyebrow">下載紀錄</p>
-      <div id="history-log" class="history-log">
-        <p class="empty-state">尚無下載紀錄。貼上網址後開始第一筆下載。</p>
-      </div>
-    </section>
+        <div id="jobs" class="jobs"></div>
+      </section>
+
+      <section class="log-section">
+        <p class="comment"># history · ls ~/downloads</p>
+        <div id="history-log" class="history-log">
+          <p class="empty-state">no downloads yet — paste a url above to begin.</p>
+        </div>
+      </section>
+    </div>
   </main>
 
   <script src="app.js"></script>
 </body>
+
 </html>

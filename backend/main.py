@@ -1,8 +1,9 @@
 """
-yt-dlp 家庭下載伺服器
+ytdlp-server-rpi
 ------------------------------------
-在 Raspberry Pi 上執行，於區域網路內提供網頁介面：
-輸入 YouTube 網址 -> yt-dlp 下載 mp4 -> 原始檔保留在本機 -> 歷史紀錄可重新下載
+Runs on a Raspberry Pi and serves a web UI on the local network:
+paste a YouTube URL -> yt-dlp downloads an mp4 -> the file stays on the device
+-> the history list lets you re-download it without calling yt-dlp again.
 """
 
 import sqlite3
@@ -17,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import yt_dlp
 
-# ---------- 路徑設定 ----------
+# ---------- Paths ----------
 BASE_DIR = Path(__file__).resolve().parent
 DOWNLOAD_DIR = BASE_DIR / "downloads"
 DB_PATH = BASE_DIR / "history.db"
@@ -25,9 +26,9 @@ FRONTEND_DIR = BASE_DIR.parent / "frontend"
 
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
-app = FastAPI(title="yt-dlp 家庭下載伺服器")
+app = FastAPI(title="ytdlp-server-rpi")
 
-# ---------- 資料庫 ----------
+# ---------- Database ----------
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -56,7 +57,7 @@ def init_db():
 
 init_db()
 
-# ---------- 記憶體中的工作狀態（下載進度）----------
+# ---------- In-memory job state (download progress) ----------
 jobs = {}
 jobs_lock = threading.Lock()
 
@@ -72,14 +73,14 @@ def get_job(job_id: str):
         return jobs.get(job_id)
 
 
-# ---------- 資料模型 ----------
+# ---------- Models ----------
 class DownloadRequest(BaseModel):
     url: str
 
 
-# ---------- 工具函式 ----------
+# ---------- Helpers ----------
 def extract_info(url: str):
-    """只取得影片資訊（標題、id、縮圖），不下載"""
+    """Fetch video info only (title, id, thumbnail) without downloading."""
     opts = {"quiet": True, "skip_download": True, "noplaylist": True}
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=False)
@@ -95,7 +96,7 @@ def find_existing(video_id: str):
 
 
 def do_download(job_id: str, url: str, video_id: str, title: str, thumbnail: str):
-    """在背景執行緒中實際呼叫 yt-dlp 下載"""
+    """Run the actual yt-dlp download in a background thread."""
 
     def progress_hook(d):
         if d["status"] == "downloading":
@@ -104,7 +105,7 @@ def do_download(job_id: str, url: str, video_id: str, title: str, thumbnail: str
             percent = round(downloaded / total * 100, 1) if total else 0
             set_job(job_id, status="downloading", percent=percent)
         elif d["status"] == "finished":
-            # 下載完成，進入合併/後處理（ffmpeg）階段
+            # Download finished; entering the merge/post-processing (ffmpeg) stage
             set_job(job_id, status="processing", percent=100)
 
     outtmpl = str(DOWNLOAD_DIR / f"{video_id}.%(ext)s")
@@ -156,13 +157,13 @@ def start_download(req: DownloadRequest):
     try:
         info = extract_info(req.url)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"無法解析此網址：{e}")
+        raise HTTPException(status_code=400, detail=f"Unable to parse this URL: {e}")
 
     video_id = info.get("id")
     title = info.get("title") or video_id
     thumbnail = info.get("thumbnail") or ""
 
-    # 已下載過 -> 直接回傳既有檔案資訊，不重跑 yt-dlp
+    # Already downloaded -> return the existing file info, skip yt-dlp
     existing = find_existing(video_id)
     if existing:
         filepath = DOWNLOAD_DIR / existing["filename"]
@@ -191,7 +192,7 @@ def start_download(req: DownloadRequest):
 def status(job_id: str):
     job = get_job(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="找不到此工作")
+        raise HTTPException(status_code=404, detail="Job not found")
     return job
 
 
@@ -213,10 +214,10 @@ def get_file(video_id: str):
     ).fetchone()
     conn.close()
     if not row:
-        raise HTTPException(status_code=404, detail="找不到此紀錄")
+        raise HTTPException(status_code=404, detail="Record not found")
     filepath = DOWNLOAD_DIR / row["filename"]
     if not filepath.exists():
-        raise HTTPException(status_code=404, detail="檔案已不存在於硬碟中")
+        raise HTTPException(status_code=404, detail="File no longer exists on disk")
     return FileResponse(
         path=filepath, filename=row["filename"], media_type="video/mp4"
     )
@@ -224,23 +225,24 @@ def get_file(video_id: str):
 
 @app.delete("/api/history/{video_id}")
 def delete_history(video_id: str):
-    """刪除一筆歷史紀錄，並移除硬碟上的影片檔案"""
+    """Delete a history record and remove the video file from disk."""
     conn = get_db()
     row = conn.execute(
         "SELECT * FROM downloads WHERE video_id = ?", (video_id,)
     ).fetchone()
     if not row:
         conn.close()
-        raise HTTPException(status_code=404, detail="找不到此紀錄")
+        raise HTTPException(status_code=404, detail="Record not found")
 
-    # 先刪檔案，再刪紀錄；檔案不存在時視為已清除，繼續刪紀錄
+    # Remove the file first, then the record; a missing file is treated as
+    # already cleared, and we still delete the record.
     filepath = DOWNLOAD_DIR / row["filename"]
     if filepath.exists():
         try:
             filepath.unlink()
         except OSError as e:  # noqa: BLE001
             conn.close()
-            raise HTTPException(status_code=500, detail=f"刪除檔案失敗：{e}")
+            raise HTTPException(status_code=500, detail=f"Failed to delete file: {e}")
 
     conn.execute("DELETE FROM downloads WHERE video_id = ?", (video_id,))
     conn.commit()
@@ -248,5 +250,5 @@ def delete_history(video_id: str):
     return {"status": "deleted", "video_id": video_id}
 
 
-# 靜態前端（放在最後掛載，避免蓋掉 /api 路由）
+# Static frontend (mounted last so it doesn't shadow the /api routes)
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
