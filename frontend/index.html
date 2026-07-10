@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>yt-dlp 家庭下載站</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <p class="eyebrow">LOCAL NETWORK · RASPBERRY PI</p>
+      <h1>yt-dlp 家庭下載站</h1>
+    </header>
+
+    <section class="panel">
+      <form id="download-form" class="input-row">
+        <input
+          type="url"
+          id="url-input"
+          placeholder="貼上 YouTube 影片網址…"
+          autocomplete="off"
+          required
+        />
+        <button type="submit" id="submit-btn">下載</button>
+      </form>
+
+      <div id="job-status" class="job-status hidden">
+        <div class="job-title" id="job-title"></div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <div class="job-meta" id="job-meta"></div>
+      </div>
+    </section>
+
+    <section class="log-section">
+      <p class="eyebrow">下載紀錄</p>
+      <div id="history-log" class="history-log">
+        <p class="empty-state">尚無下載紀錄。貼上網址後開始第一筆下載。</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
