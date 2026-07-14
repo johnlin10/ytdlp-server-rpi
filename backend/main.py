@@ -9,17 +9,19 @@ paste a YouTube URL -> yt-dlp downloads an mp4 -> the file stays on the device
 import json
 import mimetypes
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
 import threading
 import time
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import yt_dlp
@@ -228,6 +230,10 @@ def prune_jobs():
 # ---------- Models ----------
 class DownloadRequest(BaseModel):
     url: str
+
+
+class VideoIdList(BaseModel):
+    video_ids: list[str]
 
 
 class SettingsUpdate(BaseModel):
@@ -446,6 +452,72 @@ def do_download(job_id: str, url: str, video_id: str, title: str, thumbnail: str
             set_job(job_id, status="error", error=str(e))
 
 
+# ---------- Batch zip download ----------
+# Downloading several files at once by triggering many browser downloads is
+# unreliable (permission prompts, and iOS Safari usually drops all but the
+# first). Instead we stream a single .zip so the browser sees one download.
+
+_UNSAFE_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
+
+def safe_zip_name(title: str, suffix: str, used: set) -> str:
+    """A filesystem-safe, de-duplicated entry name from a video's title."""
+    base = _UNSAFE_NAME.sub("_", (title or "video")).strip().strip(".")
+    base = re.sub(r"\s+", " ", base)[:100] or "video"
+    name = f"{base}{suffix}"
+    n = 2
+    while name in used:  # e.g. two videos share a title
+        name = f"{base} ({n}){suffix}"
+        n += 1
+    used.add(name)
+    return name
+
+
+class _ZipSink:
+    """A write-only, non-seekable buffer so ZipFile streams (data descriptors)
+    instead of seeking back to patch headers — lets us yield bytes as we go and
+    never hold a whole archive (or a temp file) in memory / on the SD card."""
+
+    def __init__(self):
+        self._buf = bytearray()
+
+    def write(self, data):
+        self._buf.extend(data)
+        return len(data)
+
+    def flush(self):
+        pass
+
+    def drain(self) -> bytes:
+        chunk = bytes(self._buf)
+        self._buf.clear()
+        return chunk
+
+
+def zip_stream(files, chunk_size=64 * 1024):
+    """Yield a ZIP (stored, no recompression) of (arcname, path) pairs."""
+    sink = _ZipSink()
+    # ZIP_STORED: mp4s are already compressed, so skip CPU-heavy deflate and
+    # just bundle them — fast even on a Pi.
+    with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+        for arcname, path in files:
+            with zf.open(arcname, "w") as dest, open(path, "rb") as src:
+                while True:
+                    block = src.read(chunk_size)
+                    if not block:
+                        break
+                    dest.write(block)
+                    data = sink.drain()
+                    if data:
+                        yield data
+            data = sink.drain()
+            if data:
+                yield data
+    data = sink.drain()
+    if data:
+        yield data
+
+
 # ---------- API ----------
 @app.post("/api/download")
 def start_download(req: DownloadRequest):
@@ -565,6 +637,71 @@ def get_file(video_id: str):
         filename=row["filename"],
         media_type=media_type or "application/octet-stream",
     )
+
+
+@app.get("/api/download-zip")
+def download_zip(ids: str = Query(..., description="comma-separated video_ids")):
+    """Stream the selected videos as a single videos.zip.
+
+    A GET (rather than a fetch+blob) so the browser downloads it natively —
+    streamed to disk, shown in the download manager, and reliable on iOS.
+    """
+    wanted = [v for v in (ids.split(",") if ids else []) if v]
+    if not wanted:
+        raise HTTPException(status_code=400, detail="No video ids given")
+
+    conn = get_db()
+    rows = {
+        r["video_id"]: r
+        for r in conn.execute("SELECT * FROM downloads").fetchall()
+    }
+    conn.close()
+
+    files = []
+    used_names: set = set()
+    for vid in wanted:
+        row = rows.get(vid)
+        if not row:
+            continue
+        path = DOWNLOAD_DIR / row["filename"]
+        if not path.is_file():
+            continue
+        files.append((safe_zip_name(row["title"], path.suffix, used_names), path))
+
+    if not files:
+        raise HTTPException(status_code=404, detail="No downloadable files found")
+
+    return StreamingResponse(
+        zip_stream(files),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="videos.zip"'},
+    )
+
+
+@app.post("/api/history/delete")
+def batch_delete(req: VideoIdList):
+    """Delete several history records and their files in one request."""
+    deleted, missing, failed = [], [], []
+    conn = get_db()
+    for vid in req.video_ids:
+        row = conn.execute(
+            "SELECT * FROM downloads WHERE video_id = ?", (vid,)
+        ).fetchone()
+        if not row:
+            missing.append(vid)
+            continue
+        filepath = DOWNLOAD_DIR / row["filename"]
+        if filepath.exists():
+            try:
+                filepath.unlink()
+            except OSError:
+                failed.append(vid)
+                continue
+        conn.execute("DELETE FROM downloads WHERE video_id = ?", (vid,))
+        deleted.append(vid)
+    conn.commit()
+    conn.close()
+    return {"deleted": deleted, "missing": missing, "failed": failed}
 
 
 @app.delete("/api/history/{video_id}")

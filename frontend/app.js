@@ -5,6 +5,48 @@ const submitBtn = document.getElementById("submit-btn");
 const jobsContainer = document.getElementById("jobs");
 const historyLog = document.getElementById("history-log");
 
+// ---------- tab navigation ----------
+const tabButtons = document.querySelectorAll(".tab");
+const tabPanels = document.querySelectorAll(".tab-panel");
+
+function switchTab(name) {
+  tabButtons.forEach((b) => {
+    const active = b.dataset.tab === name;
+    b.classList.toggle("is-active", active);
+    b.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  tabPanels.forEach((p) => {
+    p.hidden = p.dataset.panel !== name;
+  });
+  refreshJobsUi();
+}
+
+tabButtons.forEach((b) =>
+  b.addEventListener("click", () => switchTab(b.dataset.tab))
+);
+
+// Badge on the download tab: how many jobs are still running while you're on
+// another tab, so progress isn't invisible after you switch away.
+const tabBadge = document.getElementById("tab-badge");
+const jobsEmpty = document.getElementById("jobs-empty");
+
+function refreshJobsUi() {
+  const cards = jobsContainer.querySelectorAll(".job-card");
+  if (jobsEmpty) jobsEmpty.hidden = cards.length > 0;
+
+  // "Active" = not yet in a terminal (done/error) state.
+  const active = jobsContainer.querySelectorAll(".job-card.is-active").length;
+  const onDownloadTab = document
+    .querySelector('.tab[data-tab="download"]')
+    .classList.contains("is-active");
+  if (active > 0 && !onDownloadTab) {
+    tabBadge.textContent = active;
+    tabBadge.hidden = false;
+  } else {
+    tabBadge.hidden = true;
+  }
+}
+
 function fmtBytes(bytes) {
   if (!bytes) return "0 MB";
   const mb = bytes / (1024 * 1024);
@@ -37,14 +79,21 @@ function triggerBrowserDownload(videoId) {
 // ---------- job cards (support multiple concurrent downloads) ----------
 function createJobCard(title) {
   const card = document.createElement("div");
-  card.className = "job-card";
+  card.className = "job-card is-active";
   card.innerHTML = `
     <div class="job-title"></div>
     <div class="job-meta">booting…</div>
   `;
   card.querySelector(".job-title").textContent = title;
   jobsContainer.prepend(card);
+  refreshJobsUi();
   return card;
+}
+
+// Mark a job as finished (drops it from the active count / tab badge).
+function settleCard(card) {
+  card.classList.remove("is-active");
+  refreshJobsUi();
 }
 
 function setCardTitle(card, title) {
@@ -58,7 +107,10 @@ function setCardMeta(card, html) {
 function retireCard(card, delay = 4000) {
   setTimeout(() => {
     card.classList.add("retiring");
-    setTimeout(() => card.remove(), 400);
+    setTimeout(() => {
+      card.remove();
+      refreshJobsUi();
+    }, 400);
   }, delay);
 }
 
@@ -96,15 +148,18 @@ function pollJob(card, jobId) {
 
       if (job.status === "done") {
         clearInterval(timer);
+        settleCard(card);
         triggerBrowserDownload(job.video_id);
         await loadHistory();
         loadStorage();
         retireCard(card);
       } else if (job.status === "error") {
         clearInterval(timer);
+        settleCard(card);
       }
     } catch (e) {
       clearInterval(timer);
+      settleCard(card);
       setCardMeta(card, `<span class="error-text">connection lost — cannot read progress</span>`);
     }
   }, 1000);
@@ -124,6 +179,7 @@ async function submitOne(url) {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
+      settleCard(card);
       setCardMeta(card, `<span class="error-text">${err.detail || "request failed"}</span>`);
       return;
     }
@@ -131,6 +187,7 @@ async function submitOne(url) {
     const data = await res.json();
 
     if (data.status === "exists") {
+      settleCard(card);
       setCardTitle(card, data.title);
       setCardMeta(card, "already downloaded · saving to your device");
       triggerBrowserDownload(data.video_id);
@@ -143,6 +200,7 @@ async function submitOne(url) {
     setCardTitle(card, data.title);
     pollJob(card, data.job_id);
   } catch (err) {
+    settleCard(card);
     setCardMeta(card, `<span class="error-text">connection failed — is the server running?</span>`);
   }
 }
@@ -179,9 +237,12 @@ form.addEventListener("submit", async (e) => {
 function renderHistory(items) {
   if (!items.length) {
     historyLog.innerHTML = `<p class="empty-state">no downloads yet — paste a url above to begin.</p>`;
+    historyToolbar.hidden = true;
+    updateSelection();
     return;
   }
 
+  historyToolbar.hidden = false;
   historyLog.innerHTML = items
     .map((item) => {
       const thumb = item.thumbnail
@@ -189,6 +250,7 @@ function renderHistory(items) {
         : `<div class="log-thumb"></div>`;
       return `
         <div class="log-entry">
+          <input type="checkbox" class="row-check" data-id="${item.video_id}" aria-label="select" />
           ${thumb}
           <div class="log-body">
             <div class="log-title" title="${item.title}">${item.title}</div>
@@ -203,9 +265,86 @@ function renderHistory(items) {
       `;
     })
     .join("");
+
+  updateSelection();
 }
 
-// Event delegation: handle the delete buttons in the history list
+// ---------- history selection / batch actions ----------
+const historyToolbar = document.getElementById("history-toolbar");
+const selectAllEl = document.getElementById("select-all");
+const selCountEl = document.getElementById("sel-count");
+const batchDownloadEl = document.getElementById("batch-download");
+const batchDeleteEl = document.getElementById("batch-delete");
+
+function rowChecks() {
+  return Array.from(historyLog.querySelectorAll(".row-check"));
+}
+
+function selectedIds() {
+  return rowChecks()
+    .filter((c) => c.checked)
+    .map((c) => c.dataset.id);
+}
+
+// Keep the count, buttons and the select-all tri-state in sync with the rows.
+function updateSelection() {
+  const checks = rowChecks();
+  const sel = checks.filter((c) => c.checked);
+  const n = sel.length;
+
+  selCountEl.textContent = `${n} selected`;
+  batchDownloadEl.disabled = n === 0;
+  batchDeleteEl.disabled = n === 0;
+
+  selectAllEl.checked = n > 0 && n === checks.length;
+  selectAllEl.indeterminate = n > 0 && n < checks.length;
+}
+
+historyLog.addEventListener("change", (e) => {
+  if (e.target.classList.contains("row-check")) updateSelection();
+});
+
+selectAllEl.addEventListener("change", () => {
+  rowChecks().forEach((c) => (c.checked = selectAllEl.checked));
+  updateSelection();
+});
+
+// Batch download: hand the browser one GET so it streams a single videos.zip
+// (see the /api/download-zip note in the backend).
+batchDownloadEl.addEventListener("click", () => {
+  const ids = selectedIds();
+  if (!ids.length) return;
+  const a = document.createElement("a");
+  a.href = `/api/download-zip?ids=${ids.map(encodeURIComponent).join(",")}`;
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+
+batchDeleteEl.addEventListener("click", async () => {
+  const ids = selectedIds();
+  if (!ids.length) return;
+  if (!confirm(`Delete ${ids.length} record(s) and their video files? This cannot be undone.`)) return;
+
+  batchDeleteEl.disabled = true;
+  batchDownloadEl.disabled = true;
+  try {
+    const res = await fetch("/api/history/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_ids: ids }),
+    });
+    if (!res.ok) throw new Error("batch delete failed");
+    await loadHistory();
+    loadStorage();
+  } catch (err) {
+    alert("Delete failed. Please try again.");
+    updateSelection();
+  }
+});
+
+// Event delegation: handle the per-row delete buttons in the history list
 historyLog.addEventListener("click", async (e) => {
   const btn = e.target.closest(".del-btn");
   if (!btn) return;

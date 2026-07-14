@@ -26,11 +26,62 @@
         <p class="comment"># yt-dlp download server · local network / raspberry pi</p>
       </header>
 
-      <details id="settings" class="settings">
-        <summary class="settings-summary">
-          <span class="comment"># preferences · vim ~/settings.json</span>
-          <span class="settings-hint">[ edit ]</span>
-        </summary>
+      <nav class="tabs" role="tablist">
+        <button class="tab is-active" role="tab" data-tab="download" aria-selected="true">
+          download<span class="tab-badge" id="tab-badge" hidden></span>
+        </button>
+        <button class="tab" role="tab" data-tab="history" aria-selected="false">history</button>
+        <button class="tab" role="tab" data-tab="settings" aria-selected="false">settings</button>
+      </nav>
+
+      <section class="tab-panel is-active" data-panel="download" role="tabpanel">
+        <form id="download-form" class="input-row">
+          <span class="prompt">$</span>
+          <input
+            type="text"
+            id="url-input"
+            placeholder="url(s), comma-separated"
+            autocomplete="off"
+            spellcheck="false"
+            required
+          />
+          <button type="submit" id="submit-btn">run</button>
+        </form>
+
+        <div id="jobs" class="jobs">
+          <p class="empty-state" id="jobs-empty"># paste a url above and hit run.</p>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-panel="history" role="tabpanel" hidden>
+        <p class="comment"># history · ls ~/downloads</p>
+
+        <div id="storage" class="storage">
+          <div class="storage-head">
+            <span class="storage-label">df -h ~/downloads</span>
+            <span class="storage-figures" id="storage-figures">—</span>
+          </div>
+          <div class="storage-bar" id="storage-bar"></div>
+        </div>
+
+        <div id="history-toolbar" class="history-toolbar" hidden>
+          <label class="ht-selectall">
+            <input type="checkbox" id="select-all" /> select all
+          </label>
+          <span class="ht-actions">
+            <span id="sel-count" class="ht-count">0 selected</span>
+            <button type="button" id="batch-download" class="ht-btn" disabled>[ save ]</button>
+            <button type="button" id="batch-delete" class="ht-btn ht-del" disabled>[ rm ]</button>
+          </span>
+        </div>
+
+        <div id="history-log" class="history-log">
+          <p class="empty-state">no downloads yet — paste a url above to begin.</p>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-panel="settings" role="tabpanel" hidden>
+        <p class="comment"># preferences · vim ~/settings.json</p>
 
         <form id="settings-form" class="settings-body">
           <label class="set-row">
@@ -62,39 +113,6 @@
             <span id="settings-status" class="settings-status"></span>
           </div>
         </form>
-      </details>
-
-      <section class="panel">
-        <form id="download-form" class="input-row">
-          <span class="prompt">$</span>
-          <input
-            type="text"
-            id="url-input"
-            placeholder="url(s), comma-separated"
-            autocomplete="off"
-            spellcheck="false"
-            required
-          />
-          <button type="submit" id="submit-btn">run</button>
-        </form>
-
-        <div id="jobs" class="jobs"></div>
-      </section>
-
-      <section class="log-section">
-        <p class="comment"># history · ls ~/downloads</p>
-
-        <div id="storage" class="storage">
-          <div class="storage-head">
-            <span class="storage-label">df -h ~/downloads</span>
-            <span class="storage-figures" id="storage-figures">—</span>
-          </div>
-          <div class="storage-bar" id="storage-bar"></div>
-        </div>
-
-        <div id="history-log" class="history-log">
-          <p class="empty-state">no downloads yet — paste a url above to begin.</p>
-        </div>
       </section>
     </div>
   </main>

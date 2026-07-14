@@ -10,7 +10,8 @@ Python application and runs on any Linux / macOS system with Python 3 and ffmpeg
 
 ## Features
 
-- Web UI: paste a URL, watch live download progress, and see finished files in the history list.
+- Web UI: paste a URL, watch live download progress, and see finished files in the history list, organised into `download` / `history` / `settings` tabs so only one thing is on screen at a time.
+- Batch actions: select multiple files in the history list to delete them together, or download them as a single `videos.zip` — one browser download that works reliably on iOS/macOS instead of many blocked ones.
 - Deduplication: keyed by the video's `video_id`, so an already-downloaded video is returned from disk instead of being downloaded again.
 - Parallel / batch downloads: paste several URLs at once separated by commas (or newlines); each runs in its own background thread with its own progress card.
 - Storage gauge: the history view shows how much space your downloads use against the total disk, with a terminal-style usage bar.
@@ -314,7 +315,9 @@ the service directly.
 | GET    | `/api/history`            | Get the download history list                           |
 | GET    | `/api/storage`            | Report downloads size and disk total/used/free          |
 | GET    | `/api/file/{video_id}`    | Download / re-download an existing mp4 file              |
+| GET    | `/api/download-zip`       | Stream the selected videos (`?ids=a,b,c`) as one `videos.zip` |
 | DELETE | `/api/history/{video_id}` | Delete a history record and remove the video file       |
+| POST   | `/api/history/delete`     | Batch-delete records + files (`{ "video_ids": [...] }`) |
 
 ## License
 
