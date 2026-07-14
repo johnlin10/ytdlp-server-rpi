@@ -63,7 +63,9 @@ function retireCard(card, delay = 4000) {
 }
 
 function updateCard(card, job) {
-  if (job.status === "downloading") {
+  if (job.status === "queued") {
+    setCardMeta(card, "queued · waiting for a free slot…");
+  } else if (job.status === "downloading") {
     const p = clampPct(job.percent);
     setCardMeta(card, `downloading <span class="bar">${asciiBar(p)}</span> ${p}%`);
   } else if (job.status === "processing") {

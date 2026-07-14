@@ -70,7 +70,23 @@ On a device on the same local network, open `http://<device-lan-ip>:8000`
 download progress, and that finished files appear in the history list. Press
 `Ctrl+C` to stop the test server.
 
-### 4. Run automatically at boot (systemd)
+### 4. Run with Docker (alternative)
+
+If you prefer containers, a `Dockerfile` and `docker-compose.yml` are included;
+the image bundles `ffmpeg` so there are no host dependencies beyond Docker
+itself. Downloads and `history.db` persist in a `./data` directory next to the
+compose file.
+
+```bash
+docker compose up -d --build
+```
+
+The UI is then on `http://<device-lan-ip>:8000`. To update yt-dlp, rebuild the
+image (`docker compose build --pull && docker compose up -d`). This works on a
+Pi (arm64) as well as x86 hosts. If you use Docker you can skip the systemd
+step below.
+
+### 5. Run automatically at boot (systemd)
 
 ```bash
 sudo cp /home/pi/ytdlp-server-rpi/ytdlp-server-rpi.service /etc/systemd/system/
@@ -85,6 +101,17 @@ sudo systemctl status ytdlp-server-rpi    # check status
 sudo systemctl restart ytdlp-server-rpi   # restart
 journalctl -u ytdlp-server-rpi -f         # follow live logs
 ```
+
+## Configuration
+
+- `MAX_CONCURRENT_DOWNLOADS` (default `3`): how many downloads may run at once.
+  Extra URLs in a batch wait in a `queued` state until a slot frees up, which
+  keeps a large batch from saturating a small device. Set it in the environment
+  (e.g. add `Environment=MAX_CONCURRENT_DOWNLOADS=2` under `[Service]` in the
+  systemd unit).
+- `DATA_DIR` (default: the `backend/` directory): where `downloads/` and
+  `history.db` are stored. The Docker setup points this at the `/data` volume so
+  state survives image rebuilds.
 
 ## Maintenance
 
@@ -127,6 +154,11 @@ the service directly.
 | DELETE | `/api/history/{video_id}` | Delete a history record and remove the video file       |
 
 ## License
+
+Released under the [MIT License](LICENSE) — you are free to use, modify, and
+fork it.
+
+### Disclaimer
 
 This project is intended for downloading lawful content on your own devices for
 personal use. Please respect YouTube's Terms of Service, your local laws, and

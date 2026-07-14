@@ -6,6 +6,8 @@ paste a YouTube URL -> yt-dlp downloads an mp4 -> the file stays on the device
 -> the history list lets you re-download it without calling yt-dlp again.
 """
 
+import mimetypes
+import os
 import shutil
 import sqlite3
 import threading
@@ -21,11 +23,31 @@ import yt_dlp
 
 # ---------- Paths ----------
 BASE_DIR = Path(__file__).resolve().parent
-DOWNLOAD_DIR = BASE_DIR / "downloads"
-DB_PATH = BASE_DIR / "history.db"
+# Where downloads and the history DB live. Defaults to the backend/ dir so a
+# bare checkout works unchanged; set DATA_DIR (e.g. to a mounted volume) to keep
+# state outside the code, which is how the Docker image persists data.
+DATA_DIR = Path(os.environ.get("DATA_DIR", BASE_DIR))
+DOWNLOAD_DIR = DATA_DIR / "downloads"
+DB_PATH = DATA_DIR / "history.db"
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
 
-DOWNLOAD_DIR.mkdir(exist_ok=True)
+DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# ---------- Config ----------
+# How many downloads may run at once. On a small device (e.g. a Pi) firing off
+# a large batch of URLs would otherwise spawn a yt-dlp/ffmpeg process per URL
+# and saturate CPU, bandwidth and SD-card writes. Extra jobs wait their turn.
+MAX_CONCURRENT_DOWNLOADS = max(1, int(os.environ.get("MAX_CONCURRENT_DOWNLOADS", "3")))
+
+# How many finished (done/error) jobs to keep in the in-memory map before the
+# oldest ones are dropped, so a long-running server doesn't grow unbounded.
+MAX_FINISHED_JOBS = 100
+
+# yt-dlp temp/partial suffixes: never treat these as the final media file, and
+# clean them up after a failed download.
+TEMP_SUFFIXES = (".part", ".ytdl", ".temp")
+
+download_semaphore = threading.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
 app = FastAPI(title="ytdlp-server-rpi")
 
@@ -67,11 +89,28 @@ def set_job(job_id: str, **kwargs):
     with jobs_lock:
         jobs.setdefault(job_id, {})
         jobs[job_id].update(kwargs)
+        # Stamp terminal states so prune_jobs can drop the oldest ones first.
+        if kwargs.get("status") in ("done", "error"):
+            jobs[job_id].setdefault("finished_at", time.time())
 
 
 def get_job(job_id: str):
     with jobs_lock:
         return jobs.get(job_id)
+
+
+def prune_jobs():
+    """Drop the oldest finished jobs so the in-memory map stays bounded."""
+    with jobs_lock:
+        finished = [
+            (jid, job) for jid, job in jobs.items()
+            if job.get("status") in ("done", "error")
+        ]
+        if len(finished) <= MAX_FINISHED_JOBS:
+            return
+        finished.sort(key=lambda kv: kv[1].get("finished_at", 0))
+        for jid, _ in finished[: len(finished) - MAX_FINISHED_JOBS]:
+            jobs.pop(jid, None)
 
 
 # ---------- Models ----------
@@ -94,6 +133,33 @@ def find_existing(video_id: str):
     ).fetchone()
     conn.close()
     return row
+
+
+def find_downloaded_file(video_id: str):
+    """Return the final media file for a video_id, or None.
+
+    We can't assume `.mp4`: the `format` fallback may produce webm/mkv, so we
+    look up whatever yt-dlp actually wrote under downloads/{video_id}.* and pick
+    the largest real file (the merged output), ignoring temp/partial files.
+    """
+    candidates = [
+        f
+        for f in DOWNLOAD_DIR.glob(f"{video_id}.*")
+        if f.is_file() and not f.name.endswith(TEMP_SUFFIXES)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda f: f.stat().st_size)
+
+
+def cleanup_temp_files(video_id: str):
+    """Remove leftover .part/.ytdl/.temp files from an interrupted download."""
+    for f in DOWNLOAD_DIR.glob(f"{video_id}.*"):
+        if f.is_file() and f.name.endswith(TEMP_SUFFIXES):
+            try:
+                f.unlink()
+            except OSError:
+                pass
 
 
 def do_download(job_id: str, url: str, video_id: str, title: str, thumbnail: str):
@@ -119,37 +185,48 @@ def do_download(job_id: str, url: str, video_id: str, title: str, thumbnail: str
         "quiet": True,
     }
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+    # Wait for a free download slot; extra jobs sit in "queued" until one opens.
+    set_job(job_id, status="queued", percent=0)
+    with download_semaphore:
+        try:
+            set_job(job_id, status="downloading", percent=0)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
 
-        filename = f"{video_id}.mp4"
-        filepath = DOWNLOAD_DIR / filename
-        filesize = filepath.stat().st_size if filepath.exists() else 0
+            filepath = find_downloaded_file(video_id)
+            if filepath is None:
+                set_job(job_id, status="error", error="download produced no file")
+                return
 
-        conn = get_db()
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO downloads
-                (video_id, title, url, filename, filesize, thumbnail, downloaded_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                video_id,
-                title,
-                url,
-                filename,
-                filesize,
-                thumbnail,
-                time.strftime("%Y-%m-%d %H:%M:%S"),
-            ),
-        )
-        conn.commit()
-        conn.close()
+            filename = filepath.name
+            filesize = filepath.stat().st_size
 
-        set_job(job_id, status="done", percent=100, filename=filename, video_id=video_id)
-    except Exception as e:  # noqa: BLE001
-        set_job(job_id, status="error", error=str(e))
+            conn = get_db()
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO downloads
+                    (video_id, title, url, filename, filesize, thumbnail, downloaded_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    video_id,
+                    title,
+                    url,
+                    filename,
+                    filesize,
+                    thumbnail,
+                    time.strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            set_job(
+                job_id, status="done", percent=100, filename=filename, video_id=video_id
+            )
+        except Exception as e:  # noqa: BLE001
+            cleanup_temp_files(video_id)
+            set_job(job_id, status="error", error=str(e))
 
 
 # ---------- API ----------
@@ -176,6 +253,7 @@ def start_download(req: DownloadRequest):
                 "filename": existing["filename"],
             }
 
+    prune_jobs()
     job_id = str(uuid.uuid4())
     set_job(job_id, status="pending", percent=0, video_id=video_id, title=title)
 
@@ -204,7 +282,7 @@ def storage():
     # which can drift if a file was removed out of band).
     downloads_bytes = 0
     for f in DOWNLOAD_DIR.glob("*"):
-        if f.is_file():
+        if f.is_file() and not f.name.endswith(TEMP_SUFFIXES):
             try:
                 downloads_bytes += f.stat().st_size
             except OSError:
@@ -241,8 +319,11 @@ def get_file(video_id: str):
     filepath = DOWNLOAD_DIR / row["filename"]
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="File no longer exists on disk")
+    media_type, _ = mimetypes.guess_type(filepath.name)
     return FileResponse(
-        path=filepath, filename=row["filename"], media_type="video/mp4"
+        path=filepath,
+        filename=row["filename"],
+        media_type=media_type or "application/octet-stream",
     )
 
 

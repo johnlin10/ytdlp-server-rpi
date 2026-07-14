@@ -1,0 +1,14 @@
+services:
+  ytdlp-server:
+    build: .
+    image: ytdlp-server-rpi
+    container_name: ytdlp-server-rpi
+    ports:
+      - "8000:8000"
+    volumes:
+      # Downloads and history.db persist here, next to the compose file.
+      - ./data:/data
+    environment:
+      - DATA_DIR=/data
+      - MAX_CONCURRENT_DOWNLOADS=3
+    restart: unless-stopped
