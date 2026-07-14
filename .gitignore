@@ -5,6 +5,7 @@ __pycache__/
 # Runtime data (created on the Pi)
 backend/downloads/
 backend/history.db
+backend/settings.json
 # Runtime data (Docker volume) — keep the dir, ignore its contents so the
 # bind mount exists and is owned by you (not created as root by Docker).
 data/*

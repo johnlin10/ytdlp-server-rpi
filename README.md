@@ -18,6 +18,8 @@ Python application and runs on any Linux / macOS system with Python 3 and ffmpeg
 - Auto-save: when a download finishes, the browser is prompted to save the mp4 to your device.
 - History: SQLite stores the title, original URL, filename, size, thumbnail and download time, with one-click delete (record + file).
 - No build step: the frontend is plain HTML/CSS/JS served directly by FastAPI, well suited to running for long periods on a Pi.
+- Apple-friendly output: prefers an H.264 rendition when downloading, and automatically re-encodes anything QuickTime/iOS can't play (e.g. VP9/AV1 from Instagram Reels) into a playable mp4 — see [Encoding preferences](#encoding-preferences).
+- Preferences panel: a settings page in the UI (codec priority, auto-transcode, transcode target, max resolution) that writes to `settings.json` on the data volume, so your choices survive a restart and anyone forking the project can tune it — or edit the JSON by hand.
 - Optional auto-update: an opt-in schedule keeps yt-dlp current (a systemd timer, or a cron job for Docker) so downloads keep working without manual upkeep — see [Automatic yt-dlp updates](#automatic-yt-dlp-updates-opt-in).
 
 ## Architecture
@@ -27,6 +29,8 @@ Python application and runs on any Linux / macOS system with Python 3 and ffmpeg
   job map and polled by the frontend once per second.
 - **Database**: SQLite (`backend/history.db`, created on first start), using
   `video_id` as a unique key to avoid duplicate downloads.
+- **Preferences**: `settings.json` (on `DATA_DIR`, created on first save),
+  holding the codec/transcode preferences so they survive a restart.
 - **File storage**: `backend/downloads/{video_id}.mp4`
 - **Frontend**: plain HTML/CSS/JS (`frontend/`), mounted at the root by FastAPI.
 
@@ -115,9 +119,60 @@ journalctl -u ytdlp-server-rpi -f         # follow live logs
   keeps a large batch from saturating a small device. Set it in the environment
   (e.g. add `Environment=MAX_CONCURRENT_DOWNLOADS=2` under `[Service]` in the
   systemd unit).
-- `DATA_DIR` (default: the `backend/` directory): where `downloads/` and
-  `history.db` are stored. The Docker setup points this at the `/data` volume so
-  state survives image rebuilds.
+- `DATA_DIR` (default: the `backend/` directory): where `downloads/`,
+  `history.db` and `settings.json` are stored. The Docker setup points this at
+  the `/data` volume so state survives image rebuilds.
+
+### Encoding preferences
+
+Some sources (notably Instagram Reels) only offer **VP9** or **AV1** video.
+yt-dlp will happily put those in an `.mp4`, but Apple platforms — QuickTime
+Player, Safari, the iOS/macOS Photos app — can't decode them, so the file looks
+broken even though it downloaded fine. To avoid that, the server:
+
+1. **Prefers an H.264 rendition** when the source offers a choice, so most
+   downloads need no re-encoding at all.
+2. **Auto-transcodes** anything whose codec still isn't Apple-friendly into a
+   playable mp4 (correct `avc1`/`hvc1` tag). While this runs, the job shows a
+   `transcoding` status in the UI — on a Raspberry Pi this can take a while,
+   since encoding is done in software.
+
+These are adjustable and **persist across restarts** (they live in
+`settings.json` on your `DATA_DIR`). Two ways to change them:
+
+**From the UI** — open the `# preferences` panel at the top of the page, adjust,
+and click *save*. Changes apply to the next download.
+
+**By editing the file** — handy on a headless Pi or for version-controlling a
+setup. Edit `settings.json` in your data directory (for Docker that's
+`./data/settings.json`; for the systemd/venv setup it's
+`backend/settings.json`, or wherever you pointed `DATA_DIR`):
+
+```jsonc
+{
+  // Ordered by preference; the first entry is the codec yt-dlp is asked to
+  // prefer. Allowed: "h264", "hevc", "vp9", "av1".
+  "video_codec_priority": ["h264", "hevc", "vp9", "av1"],
+  // Re-encode a finished download when its codec isn't Apple-friendly.
+  "auto_transcode": true,
+  // Target for that re-encode: "h264" (fast on a Pi, widest support) or
+  // "hevc" (~40% smaller files, but much slower to encode in software).
+  "transcode_target": "h264",
+  // Cap the downloaded resolution in pixels of height. 0 = no limit.
+  "max_height": 0
+}
+```
+
+The file is read at the start of each download, so no restart is needed after a
+hand edit. Invalid or unknown values are ignored and fall back to the defaults
+above, so a typo can't break downloads. Delete the file to return to defaults.
+
+> **Fixing a file you already downloaded** as broken VP9-in-mp4? Re-encode it in
+> place with ffmpeg (this is exactly what the server now does automatically):
+>
+> ```bash
+> ffmpeg -i broken.mp4 -c:v libx264 -crf 23 -tag:v avc1 -c:a aac -movflags +faststart fixed.mp4
+> ```
 
 ## Maintenance
 
@@ -253,7 +308,9 @@ the service directly.
 | Method | Path                      | Description                                              |
 |--------|---------------------------|---------------------------------------------------------|
 | POST   | `/api/download`           | Send `{ "url": "..." }`; starts a download or returns an existing record |
-| GET    | `/api/status/{job_id}`    | Query download progress                                 |
+| GET    | `/api/status/{job_id}`    | Query download progress (`downloading` / `processing` / `transcoding` / `done`) |
+| GET    | `/api/settings`           | Get encoding preferences plus the available options     |
+| PUT    | `/api/settings`           | Update encoding preferences (partial updates allowed)   |
 | GET    | `/api/history`            | Get the download history list                           |
 | GET    | `/api/storage`            | Report downloads size and disk total/used/free          |
 | GET    | `/api/file/{video_id}`    | Download / re-download an existing mp4 file              |

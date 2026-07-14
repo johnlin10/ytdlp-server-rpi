@@ -70,6 +70,12 @@ function updateCard(card, job) {
     setCardMeta(card, `downloading <span class="bar">${asciiBar(p)}</span> ${p}%`);
   } else if (job.status === "processing") {
     setCardMeta(card, "processing · merging audio/video…");
+  } else if (job.status === "transcoding") {
+    const tgt = job.target ? job.target.toUpperCase() : "";
+    setCardMeta(
+      card,
+      `transcoding${tgt ? ` → ${tgt}` : ""} · re-encoding for ios/macos… <span class="spin"></span>`
+    );
   } else if (job.status === "done") {
     setCardMeta(card, "done · saving to your device");
   } else if (job.status === "error") {
@@ -272,5 +278,103 @@ async function loadStorage() {
   }
 }
 
+// ---------- preferences ----------
+const settingsForm = document.getElementById("settings-form");
+const codecPriorityEl = document.getElementById("codec-priority");
+const autoTranscodeEl = document.getElementById("auto-transcode");
+const transcodeTargetEl = document.getElementById("transcode-target");
+const maxHeightEl = document.getElementById("max-height");
+const settingsStatusEl = document.getElementById("settings-status");
+
+// The codec order lives here and is rendered as a reorderable list; the backend
+// only strongly honours the first entry (the rest is the transcode fallback).
+let codecOrder = [];
+
+function renderCodecPriority() {
+  codecPriorityEl.innerHTML = codecOrder
+    .map((codec, i) => {
+      const primary = i === 0 ? ' <span class="codec-tag">preferred</span>' : "";
+      return `
+        <div class="codec-item">
+          <span class="codec-rank">${i + 1}.</span>
+          <span class="codec-name">${codec}${primary}</span>
+          <span class="codec-move">
+            <button type="button" class="codec-btn" data-dir="up" data-i="${i}" ${i === 0 ? "disabled" : ""}>[↑]</button>
+            <button type="button" class="codec-btn" data-dir="down" data-i="${i}" ${i === codecOrder.length - 1 ? "disabled" : ""}>[↓]</button>
+          </span>
+        </div>`;
+    })
+    .join("");
+}
+
+codecPriorityEl.addEventListener("click", (e) => {
+  const btn = e.target.closest(".codec-btn");
+  if (!btn) return;
+  const i = Number(btn.dataset.i);
+  const j = btn.dataset.dir === "up" ? i - 1 : i + 1;
+  if (j < 0 || j >= codecOrder.length) return;
+  [codecOrder[i], codecOrder[j]] = [codecOrder[j], codecOrder[i]];
+  renderCodecPriority();
+});
+
+function applySettings(settings, options) {
+  codecOrder = settings.video_codec_priority.slice();
+  // Append any codec the server knows about but isn't in the saved list, so a
+  // newer option still shows up (at the bottom).
+  options.video_codecs.forEach((c) => {
+    if (!codecOrder.includes(c)) codecOrder.push(c);
+  });
+  renderCodecPriority();
+
+  autoTranscodeEl.checked = settings.auto_transcode;
+
+  transcodeTargetEl.innerHTML = options.transcode_targets
+    .map((t) => `<option value="${t}">${t}</option>`)
+    .join("");
+  transcodeTargetEl.value = settings.transcode_target;
+
+  maxHeightEl.value = settings.max_height || 0;
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch("/api/settings");
+    if (!res.ok) return;
+    const data = await res.json();
+    applySettings(data.settings, data.options);
+  } catch (e) {
+    // fail silently; the panel just stays empty
+  }
+}
+
+settingsForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  settingsStatusEl.textContent = "saving…";
+  const payload = {
+    video_codec_priority: codecOrder,
+    auto_transcode: autoTranscodeEl.checked,
+    transcode_target: transcodeTargetEl.value,
+    max_height: Math.max(0, parseInt(maxHeightEl.value, 10) || 0),
+  };
+  try {
+    const res = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("save failed");
+    const data = await res.json();
+    // Re-apply what the server actually stored (it clamps/validates).
+    codecOrder = data.settings.video_codec_priority.slice();
+    renderCodecPriority();
+    maxHeightEl.value = data.settings.max_height || 0;
+    settingsStatusEl.textContent = "saved ✓ · applies to new downloads";
+    setTimeout(() => (settingsStatusEl.textContent = ""), 4000);
+  } catch (err) {
+    settingsStatusEl.textContent = "save failed — try again";
+  }
+});
+
+loadSettings();
 loadHistory();
 loadStorage();

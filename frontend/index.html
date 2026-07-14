@@ -26,6 +26,44 @@
         <p class="comment"># yt-dlp download server · local network / raspberry pi</p>
       </header>
 
+      <details id="settings" class="settings">
+        <summary class="settings-summary">
+          <span class="comment"># preferences · vim ~/settings.json</span>
+          <span class="settings-hint">[ edit ]</span>
+        </summary>
+
+        <form id="settings-form" class="settings-body">
+          <label class="set-row">
+            <span class="set-label">download codec priority</span>
+            <span class="set-desc"># preferred first; falls back down the list</span>
+            <div id="codec-priority" class="codec-priority"></div>
+          </label>
+
+          <label class="set-row set-inline">
+            <input type="checkbox" id="auto-transcode" />
+            <span class="set-label">auto-transcode incompatible files</span>
+            <span class="set-desc"># re-encode VP9/AV1 into an iOS/macOS mp4</span>
+          </label>
+
+          <label class="set-row">
+            <span class="set-label">transcode target</span>
+            <span class="set-desc"># h264 = fast on a Pi · hevc = smaller, slow to encode</span>
+            <select id="transcode-target" class="set-select"></select>
+          </label>
+
+          <label class="set-row">
+            <span class="set-label">max resolution (height px)</span>
+            <span class="set-desc"># 0 = no limit · e.g. 1080 caps downloads at 1080p</span>
+            <input type="number" id="max-height" class="set-input" min="0" step="1" />
+          </label>
+
+          <div class="settings-actions">
+            <button type="submit" id="settings-save">save</button>
+            <span id="settings-status" class="settings-status"></span>
+          </div>
+        </form>
+      </details>
+
       <section class="panel">
         <form id="download-form" class="input-row">
           <span class="prompt">$</span>
