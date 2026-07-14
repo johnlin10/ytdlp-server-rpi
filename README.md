@@ -140,11 +140,12 @@ pip install -U yt-dlp
 sudo systemctl restart ytdlp-server-rpi
 ```
 
-Docker (yt-dlp is baked into the image, so rebuild it):
+Docker (yt-dlp is baked into the image, so rebuild it — the `YTDLP_REFRESH`
+build arg forces the yt-dlp layer to rebuild instead of using a cached copy):
 
 ```bash
 cd /home/pi/ytdlp-server-rpi
-docker compose build --pull && docker compose up -d
+docker compose build --build-arg YTDLP_REFRESH=$(date +%s) && docker compose up -d
 ```
 
 #### Update the app
@@ -172,6 +173,10 @@ docker compose up -d --build
 Updating yt-dlp on a schedule keeps downloads working without manual babysitting.
 Updating the app itself is deliberately left manual — an unattended `git pull`
 could pull in breaking changes or conflict with local edits.
+
+Both examples below assume the `pi` user and `/home/pi/...` paths from the
+install section — adjust them to match your own user and install path (the same
+values you set in `ytdlp-server-rpi.service`).
 
 **systemd:** add a timer that updates yt-dlp weekly and restarts the service.
 Create `/etc/systemd/system/ytdlp-update.service`:
@@ -209,12 +214,16 @@ sudo systemctl enable --now ytdlp-update.timer
 sudo systemctl list-timers ytdlp-update.timer   # confirm the next run time
 ```
 
-**Docker:** schedule a weekly rebuild (which re-pulls the latest yt-dlp) with
-cron — run `crontab -e` and add:
+**Docker:** schedule a weekly rebuild with cron — run `crontab -e` and add:
 
 ```cron
-0 4 * * 0 cd /home/pi/ytdlp-server-rpi && docker compose build --pull && docker compose up -d
+0 4 * * 0 cd /home/pi/ytdlp-server-rpi && docker compose build --build-arg YTDLP_REFRESH=$(date +%s) && docker compose up -d
 ```
+
+The `YTDLP_REFRESH` build arg busts only the yt-dlp layer, so the rebuild is
+quick and actually pulls the latest yt-dlp. (A plain `docker compose build
+--pull` would *not* update yt-dlp: the `pip install` layer stays cached unless
+the base image digest happens to change that week.)
 
 ### Storage
 

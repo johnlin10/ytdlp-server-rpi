@@ -11,6 +11,14 @@ WORKDIR /app
 COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
+# Upgrade yt-dlp to the latest release in its own layer. A normal build keeps
+# this cached; to refresh just yt-dlp (e.g. from a scheduled job) without
+# rebuilding the heavier layers, bust only this one:
+#   docker compose build --build-arg YTDLP_REFRESH=$(date +%s)
+ARG YTDLP_REFRESH=0
+RUN echo "yt-dlp refresh: ${YTDLP_REFRESH}" \
+    && pip install --no-cache-dir -U yt-dlp
+
 COPY backend/ backend/
 COPY frontend/ frontend/
 
