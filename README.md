@@ -214,10 +214,12 @@ sudo systemctl enable --now ytdlp-update.timer
 sudo systemctl list-timers ytdlp-update.timer   # confirm the next run time
 ```
 
-**Docker:** schedule a weekly rebuild with cron — run `crontab -e` and add:
+**Docker:** schedule a weekly rebuild with cron — run `crontab -e` and add
+(note the `\%`: cron treats a bare `%` as a newline and would truncate the
+command there):
 
 ```cron
-0 4 * * 0 cd /home/pi/ytdlp-server-rpi && docker compose build --build-arg YTDLP_REFRESH=$(date +%s) && docker compose up -d
+0 4 * * 0 cd /home/pi/ytdlp-server-rpi && docker compose build --build-arg YTDLP_REFRESH=$(date +\%s) && docker compose up -d
 ```
 
 The `YTDLP_REFRESH` build arg busts only the yt-dlp layer, so the rebuild is
