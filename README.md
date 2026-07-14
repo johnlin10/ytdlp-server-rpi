@@ -18,6 +18,7 @@ Python application and runs on any Linux / macOS system with Python 3 and ffmpeg
 - Auto-save: when a download finishes, the browser is prompted to save the mp4 to your device.
 - History: SQLite stores the title, original URL, filename, size, thumbnail and download time, with one-click delete (record + file).
 - No build step: the frontend is plain HTML/CSS/JS served directly by FastAPI, well suited to running for long periods on a Pi.
+- Optional auto-update: an opt-in schedule keeps yt-dlp current (a systemd timer, or a cron job for Docker) so downloads keep working without manual upkeep — see [Automatic yt-dlp updates](#automatic-yt-dlp-updates-opt-in).
 
 ## Architecture
 
@@ -168,11 +169,15 @@ git pull
 docker compose up -d --build
 ```
 
-#### Automatic yt-dlp updates (optional)
+#### Automatic yt-dlp updates (opt-in)
 
-Updating yt-dlp on a schedule keeps downloads working without manual babysitting.
-Updating the app itself is deliberately left manual — an unattended `git pull`
-could pull in breaking changes or conflict with local edits.
+This is **opt-in**: nothing auto-updates until you set up the timer or cron job
+below. Once you do, yt-dlp is refreshed on a schedule so downloads keep working
+without manual babysitting. Updating the app itself is deliberately left manual —
+an unattended `git pull` could pull in breaking changes or conflict with local
+edits.
+
+Pick the one matching how you deployed:
 
 Both examples below assume the `pi` user and `/home/pi/...` paths from the
 install section — adjust them to match your own user and install path (the same
