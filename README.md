@@ -82,9 +82,14 @@ docker compose up -d --build
 ```
 
 The UI is then on `http://<device-lan-ip>:8000`. To update yt-dlp, rebuild the
-image (`docker compose build --pull && docker compose up -d`). This works on a
-Pi (arm64) as well as x86 hosts. If you use Docker you can skip the systemd
-step below.
+image (`docker compose build --pull && docker compose up -d`). Verified on a
+Raspberry Pi 4 (64-bit / arm64) as well as x86 hosts. If you use Docker you can
+skip the systemd step below.
+
+The container runs as a non-root user (uid/gid `1000`, the default Raspberry Pi
+OS user), so downloaded files under `./data` are owned by you and manageable
+without `sudo`. If your host account isn't uid 1000, run
+`sudo chown -R 1000:1000 data` once after cloning.
 
 ### 5. Run automatically at boot (systemd)
 

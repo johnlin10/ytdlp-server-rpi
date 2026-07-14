@@ -14,6 +14,15 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ backend/
 COPY frontend/ frontend/
 
+# Run as a non-root user (uid/gid 1000, the default Raspberry Pi OS user) so
+# files written to the mounted /data volume are owned by you on the host rather
+# than root. If your host user isn't 1000, chown ./data to match after cloning.
+RUN groupadd -g 1000 app \
+    && useradd -u 1000 -g 1000 -m app \
+    && mkdir -p /data \
+    && chown -R app:app /data
+USER app
+
 # Keep downloads and the history DB on a mounted volume, outside the image.
 ENV DATA_DIR=/data
 VOLUME ["/data"]
