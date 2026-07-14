@@ -120,15 +120,100 @@ journalctl -u ytdlp-server-rpi -f         # follow live logs
 
 ## Maintenance
 
-### Keep yt-dlp up to date
+### Updating
 
-YouTube changes its interface often, which breaks older versions of yt-dlp.
-Update it periodically:
+Two things need to stay current: **yt-dlp** (often, since YouTube's frequent
+changes break older versions) and the **app itself** (occasionally). yt-dlp is
+what actually breaks downloads, so if a download suddenly starts failing, update
+that first.
+
+Your `downloads/`, `history.db` and `./data` are git-ignored, so `git pull`
+never touches your files or history.
+
+#### Update yt-dlp
+
+systemd / venv:
 
 ```bash
 source /home/pi/ytdlp-server-rpi/venv/bin/activate
 pip install -U yt-dlp
 sudo systemctl restart ytdlp-server-rpi
+```
+
+Docker (yt-dlp is baked into the image, so rebuild it):
+
+```bash
+cd /home/pi/ytdlp-server-rpi
+docker compose build --pull && docker compose up -d
+```
+
+#### Update the app
+
+systemd / venv:
+
+```bash
+cd /home/pi/ytdlp-server-rpi
+git pull
+source venv/bin/activate
+pip install -U -r backend/requirements.txt
+sudo systemctl restart ytdlp-server-rpi
+```
+
+Docker:
+
+```bash
+cd /home/pi/ytdlp-server-rpi
+git pull
+docker compose up -d --build
+```
+
+#### Automatic yt-dlp updates (optional)
+
+Updating yt-dlp on a schedule keeps downloads working without manual babysitting.
+Updating the app itself is deliberately left manual — an unattended `git pull`
+could pull in breaking changes or conflict with local edits.
+
+**systemd:** add a timer that updates yt-dlp weekly and restarts the service.
+Create `/etc/systemd/system/ytdlp-update.service`:
+
+```ini
+[Unit]
+Description=Update yt-dlp for ytdlp-server-rpi
+
+[Service]
+Type=oneshot
+# runuser keeps the venv files owned by pi; the restart needs root.
+ExecStart=/usr/sbin/runuser -u pi -- /home/pi/ytdlp-server-rpi/venv/bin/pip install -U yt-dlp
+ExecStartPost=/bin/systemctl restart ytdlp-server-rpi
+```
+
+and `/etc/systemd/system/ytdlp-update.timer`:
+
+```ini
+[Unit]
+Description=Weekly yt-dlp update
+
+[Timer]
+OnCalendar=Sun 04:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Then enable it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now ytdlp-update.timer
+sudo systemctl list-timers ytdlp-update.timer   # confirm the next run time
+```
+
+**Docker:** schedule a weekly rebuild (which re-pulls the latest yt-dlp) with
+cron — run `crontab -e` and add:
+
+```cron
+0 4 * * 0 cd /home/pi/ytdlp-server-rpi && docker compose build --pull && docker compose up -d
 ```
 
 ### Storage
