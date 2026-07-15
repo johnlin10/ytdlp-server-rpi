@@ -205,12 +205,70 @@ async function submitOne(url) {
   }
 }
 
+// ---------- tracking-param stripping ----------
+// Whether to auto-remove tracking params from URLs. Mirrors the persisted
+// `strip_tracking_params` setting; updated once settings load / are saved.
+let stripTracking = false;
+
+// Known tracking query keys to drop. Deliberately conservative: only params
+// that carry no playback meaning, so functional ones (YouTube v=/list=/t=,
+// etc.) are always preserved.
+const TRACKING_PARAMS = new Set([
+  "igsh", "igshid",                 // Instagram
+  "si",                             // YouTube / Spotify share id
+  "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+  "utm_id", "utm_name",
+  "fbclid", "gclid", "dclid", "msclkid", "yclid", // ad click ids
+  "mc_cid", "mc_eid",               // Mailchimp
+  "ref_src", "ref_url",             // Twitter / X
+]);
+
+// Strip tracking params from one URL string. Operates only on the query part
+// (splitting on the first '?'), so it works on scheme-less/partial input too
+// and never disturbs the path, hash, or any param we don't recognise.
+function stripTrackingFromUrl(token) {
+  const hashIdx = token.indexOf("#");
+  const hash = hashIdx >= 0 ? token.slice(hashIdx) : "";
+  const noHash = hashIdx >= 0 ? token.slice(0, hashIdx) : token;
+  const qIdx = noHash.indexOf("?");
+  if (qIdx < 0) return token;
+
+  const base = noHash.slice(0, qIdx);
+  const kept = noHash
+    .slice(qIdx + 1)
+    .split("&")
+    .filter((pair) => pair && !TRACKING_PARAMS.has(pair.split("=")[0].toLowerCase()));
+
+  return base + (kept.length ? "?" + kept.join("&") : "") + hash;
+}
+
+// Apply the strip across a whole input value while preserving the user's
+// separators (commas / newlines) so multi-URL input keeps its layout.
+function stripTrackingFromText(text) {
+  return text
+    .split(/([\n,]+)/) // keep the separators as captured groups
+    .map((part) => (/[\n,]/.test(part) ? part : stripTrackingFromUrl(part)))
+    .join("");
+}
+
+// Clean tracking params live as the user types/pastes, when the pref is on.
+urlInput.addEventListener("input", () => {
+  if (!stripTracking) return;
+  const before = urlInput.value;
+  const after = stripTrackingFromText(before);
+  if (after === before) return;
+  const wasAtEnd = urlInput.selectionStart === before.length;
+  urlInput.value = after;
+  if (wasAtEnd) urlInput.setSelectionRange(after.length, after.length);
+});
+
 // Split on commas (and newlines, for convenience) into a de-duplicated list.
 function parseUrls(raw) {
   const seen = new Set();
   return raw
     .split(/[\n,]+/)
     .map((s) => s.trim())
+    .map((s) => (stripTracking ? stripTrackingFromUrl(s) : s))
     .filter((s) => {
       if (!s || seen.has(s)) return false;
       seen.add(s);
@@ -423,6 +481,7 @@ const codecPriorityEl = document.getElementById("codec-priority");
 const autoTranscodeEl = document.getElementById("auto-transcode");
 const transcodeTargetEl = document.getElementById("transcode-target");
 const maxHeightEl = document.getElementById("max-height");
+const stripTrackingEl = document.getElementById("strip-tracking");
 const settingsStatusEl = document.getElementById("settings-status");
 
 // The codec order lives here and is rendered as a reorderable list; the backend
@@ -467,6 +526,9 @@ function applySettings(settings, options) {
 
   autoTranscodeEl.checked = settings.auto_transcode;
 
+  stripTrackingEl.checked = settings.strip_tracking_params;
+  stripTracking = settings.strip_tracking_params;
+
   transcodeTargetEl.innerHTML = options.transcode_targets
     .map((t) => `<option value="${t}">${t}</option>`)
     .join("");
@@ -494,6 +556,7 @@ settingsForm.addEventListener("submit", async (e) => {
     auto_transcode: autoTranscodeEl.checked,
     transcode_target: transcodeTargetEl.value,
     max_height: Math.max(0, parseInt(maxHeightEl.value, 10) || 0),
+    strip_tracking_params: stripTrackingEl.checked,
   };
   try {
     const res = await fetch("/api/settings", {
@@ -507,6 +570,7 @@ settingsForm.addEventListener("submit", async (e) => {
     codecOrder = data.settings.video_codec_priority.slice();
     renderCodecPriority();
     maxHeightEl.value = data.settings.max_height || 0;
+    stripTracking = data.settings.strip_tracking_params;
     settingsStatusEl.textContent = "saved ✓ · applies to new downloads";
     setTimeout(() => (settingsStatusEl.textContent = ""), 4000);
   } catch (err) {

@@ -9,9 +9,11 @@ paste a YouTube URL -> yt-dlp downloads an mp4 -> the file stays on the device
 import json
 import mimetypes
 import os
+import random
 import re
 import shutil
 import sqlite3
+import string
 import subprocess
 import threading
 import time
@@ -91,6 +93,10 @@ DEFAULT_SETTINGS = {
     "transcode_target": "h264",
     # Cap the downloaded resolution (px height). 0 = no limit.
     "max_height": 0,
+    # Auto-strip known tracking params (e.g. Instagram's ?igsh=...) from URLs
+    # typed/pasted into the box. Purely a UI convenience; the frontend applies
+    # it, this flag just persists the preference across devices.
+    "strip_tracking_params": True,
 }
 
 _settings_lock = threading.Lock()
@@ -117,6 +123,9 @@ def _coerce_settings(raw: dict) -> dict:
 
     if isinstance(raw.get("auto_transcode"), bool):
         s["auto_transcode"] = raw["auto_transcode"]
+
+    if isinstance(raw.get("strip_tracking_params"), bool):
+        s["strip_tracking_params"] = raw["strip_tracking_params"]
 
     if raw.get("transcode_target") in TRANSCODE_ENCODERS:
         s["transcode_target"] = raw["transcode_target"]
@@ -243,6 +252,7 @@ class SettingsUpdate(BaseModel):
     auto_transcode: Optional[bool] = None
     transcode_target: Optional[str] = None
     max_height: Optional[int] = None
+    strip_tracking_params: Optional[bool] = None
 
 
 # ---------- Helpers ----------
@@ -251,6 +261,56 @@ def extract_info(url: str):
     opts = {"quiet": True, "skip_download": True, "noplaylist": True}
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=False)
+
+
+# ---------- Instagram filename ----------
+# For Instagram we name the *downloaded* file after the author's handle rather
+# than the opaque video id, e.g. "DazM_F0Th0I@some.user - rF3fGk":
+#   DazM_F0Th0I  -> the shortcode from .../reel/DazM_F0Th0I
+#   @some.user   -> the uploader's Instagram username
+#   rF3fGk       -> 6 random alphanumerics, so two posts by the same author
+#                   (or the same clip re-fetched) never collide on disk.
+# This only changes the name served to the browser; on disk the file is still
+# stored as {video_id}.{ext} so the dedup / lookup logic is untouched.
+_IG_URL = re.compile(
+    r"instagram\.com/(?:[^/?#]+/)?(?:reel|reels|p|tv)/([A-Za-z0-9_-]+)", re.I
+)
+_RAND_ALPHABET = string.ascii_letters + string.digits
+
+
+def _instagram_username(info: dict) -> str:
+    """Best-effort pull of the author's @handle from a yt-dlp info dict.
+
+    yt-dlp's Instagram extractor puts the handle in `channel`; `uploader_id` is
+    often the numeric pk, so we only fall back to it when it isn't all digits.
+    """
+    username = info.get("channel")
+    if not username:
+        m = re.search(r"instagram\.com/([^/?#]+)", info.get("uploader_url") or "")
+        if m:
+            username = m.group(1)
+    if not username:
+        uid = info.get("uploader_id") or ""
+        if uid and not uid.isdigit():
+            username = uid
+    if not username:
+        username = info.get("uploader") or ""
+    return username.lstrip("@").strip()
+
+
+def build_download_name(url: str, info: dict) -> Optional[str]:
+    """Instagram: '{shortcode}@{username} - {rand6}'. None for other sites.
+
+    Returning None keeps the default {video_id} name for everything non-IG.
+    """
+    m = _IG_URL.search(url or "")
+    if not m:
+        return None
+    username = _instagram_username(info)
+    if not username:
+        return None
+    rand = "".join(random.choices(_RAND_ALPHABET, k=6))
+    return sanitize_filename(f"{m.group(1)}@{username} - {rand}")
 
 
 def find_existing(video_id: str):
@@ -380,7 +440,14 @@ def maybe_transcode(video_id: str, filepath: Path, settings: dict, job_id: str):
     return out
 
 
-def do_download(job_id: str, url: str, video_id: str, title: str, thumbnail: str):
+def do_download(
+    job_id: str,
+    url: str,
+    video_id: str,
+    title: str,
+    thumbnail: str,
+    download_name: Optional[str] = None,
+):
     """Run the actual yt-dlp download in a background thread."""
 
     def progress_hook(d):
@@ -421,6 +488,14 @@ def do_download(job_id: str, url: str, video_id: str, title: str, thumbnail: str
             # may take a while on a Pi, hence the separate "transcoding" status.
             filepath = maybe_transcode(video_id, filepath, settings, job_id)
 
+            # Rename the finished file to the author-based name for Instagram
+            # (done last, so download/transcode/cleanup all still key off the
+            # {video_id} name). Other sites keep the {video_id} filename.
+            if download_name:
+                renamed = DOWNLOAD_DIR / f"{download_name}{filepath.suffix}"
+                filepath.replace(renamed)
+                filepath = renamed
+
             filename = filepath.name
             filesize = filepath.stat().st_size
 
@@ -460,10 +535,15 @@ def do_download(job_id: str, url: str, video_id: str, title: str, thumbnail: str
 _UNSAFE_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
+def sanitize_filename(name: str, limit: int = 150) -> str:
+    """Make a string safe to use as a filename (no path/reserved chars)."""
+    base = _UNSAFE_NAME.sub("_", (name or "video")).strip().strip(".")
+    return re.sub(r"\s+", " ", base)[:limit] or "video"
+
+
 def safe_zip_name(title: str, suffix: str, used: set) -> str:
     """A filesystem-safe, de-duplicated entry name from a video's title."""
-    base = _UNSAFE_NAME.sub("_", (title or "video")).strip().strip(".")
-    base = re.sub(r"\s+", " ", base)[:100] or "video"
+    base = sanitize_filename(title, limit=100)
     name = f"{base}{suffix}"
     n = 2
     while name in used:  # e.g. two videos share a title
@@ -529,6 +609,9 @@ def start_download(req: DownloadRequest):
     video_id = info.get("id")
     title = info.get("title") or video_id
     thumbnail = info.get("thumbnail") or ""
+    # Instagram links get an author-based download name; everything else stays
+    # on the default {video_id} filename (build_download_name returns None).
+    download_name = build_download_name(req.url, info)
 
     # Already downloaded -> return the existing file info, skip yt-dlp
     existing = find_existing(video_id)
@@ -548,7 +631,7 @@ def start_download(req: DownloadRequest):
 
     thread = threading.Thread(
         target=do_download,
-        args=(job_id, req.url, video_id, title, thumbnail),
+        args=(job_id, req.url, video_id, title, thumbnail, download_name),
         daemon=True,
     )
     thread.start()
@@ -666,7 +749,11 @@ def download_zip(ids: str = Query(..., description="comma-separated video_ids"))
         path = DOWNLOAD_DIR / row["filename"]
         if not path.is_file():
             continue
-        files.append((safe_zip_name(row["title"], path.suffix, used_names), path))
+        # Instagram files are renamed to a meaningful author-based name on disk
+        # (stem differs from the video_id); use it. Otherwise the on-disk name
+        # is the opaque {video_id}, so fall back to the human title.
+        entry_base = path.stem if path.stem != row["video_id"] else row["title"]
+        files.append((safe_zip_name(entry_base, path.suffix, used_names), path))
 
     if not files:
         raise HTTPException(status_code=404, detail="No downloadable files found")

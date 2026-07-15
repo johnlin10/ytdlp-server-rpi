@@ -84,6 +84,12 @@
         <p class="comment"># preferences · vim ~/settings.json</p>
 
         <form id="settings-form" class="settings-body">
+          <label class="set-row set-inline">
+            <input type="checkbox" id="strip-tracking" />
+            <span class="set-label">strip tracking params from urls</span>
+            <span class="set-desc"># auto-remove ?igsh=…, utm_*, fbclid… as you type</span>
+          </label>
+
           <label class="set-row">
             <span class="set-label">download codec priority</span>
             <span class="set-desc"># preferred first; falls back down the list</span>
