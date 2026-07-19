@@ -63,7 +63,7 @@ app = FastAPI(title="ytdlp-server-rpi")
 # Single source of truth for the app version (semantic versioning). Bump this on
 # each release together with the git commit prefix / tag; the frontend footer
 # reads it from /api/version so it never needs a separate edit.
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 
 # ---------- Encoding preferences ----------
 # These control which video codec yt-dlp is asked to prefer, and whether a

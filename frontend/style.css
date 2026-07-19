@@ -35,7 +35,7 @@ body {
 .term {
   width: 100%;
   max-width: 720px;
-  align-self: flex-start;
+  align-self: center;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
