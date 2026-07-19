@@ -251,8 +251,10 @@ function stripTrackingFromText(text) {
     .join("");
 }
 
-// Clean tracking params live as the user types/pastes, when the pref is on.
-urlInput.addEventListener("input", () => {
+// Strip tracking params from the box's current value in place, preserving the
+// caret when it sits at the end. Shared by the live `input` handler and the
+// programmatic paste path (setting .value doesn't fire `input`).
+function applyStripTrackingLive() {
   if (!stripTracking) return;
   const before = urlInput.value;
   const after = stripTrackingFromText(before);
@@ -260,6 +262,44 @@ urlInput.addEventListener("input", () => {
   const wasAtEnd = urlInput.selectionStart === before.length;
   urlInput.value = after;
   if (wasAtEnd) urlInput.setSelectionRange(after.length, after.length);
+}
+
+// Clean tracking params live as the user types, when the pref is on.
+urlInput.addEventListener("input", applyStripTrackingLive);
+
+// ---------- url extraction ----------
+// Social-media "share" text often wraps the link in a caption/title, e.g.
+// "看看這個影片！ https://www.instagram.com/reel/…". Feeding that whole blob to
+// yt-dlp fails, so we pull out just the http(s) link(s). Commas and whitespace
+// end a match (commas are our multi-url separator), and trailing sentence
+// punctuation is trimmed so "…/abc." doesn't keep the period.
+const URL_RE = /https?:\/\/[^\s,]+/gi;
+
+function extractUrls(text) {
+  const matches = text.match(URL_RE);
+  if (!matches) return null;
+  return matches.map((u) => u.replace(/[.,;!?)\]}'"]+$/, "")).join(", ");
+}
+
+// Replace the current selection (or insert at the caret) with text.
+function insertAtCursor(input, text) {
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  input.value = input.value.slice(0, start) + text + input.value.slice(end);
+  const pos = start + text.length;
+  input.setSelectionRange(pos, pos);
+}
+
+// On paste, keep only the url(s) when the clipboard carried extra noise around
+// them. A clean paste (a bare url, or scheme-less text we can't recognise as a
+// link) falls through to the browser's default so we never mangle real input.
+urlInput.addEventListener("paste", (e) => {
+  const pasted = (e.clipboardData || window.clipboardData)?.getData("text") ?? "";
+  const urls = extractUrls(pasted);
+  if (!urls || urls === pasted.trim()) return;
+  e.preventDefault();
+  insertAtCursor(urlInput, urls);
+  applyStripTrackingLive();
 });
 
 // Split on commas (and newlines, for convenience) into a de-duplicated list.
@@ -276,10 +316,13 @@ function parseUrls(raw) {
     });
 }
 
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
+// Kick off downloads for whatever's in the box. parseUrls applies the
+// tracking-param strip per token, so "strip then download" happens here for
+// both the manual run button and the auto-paste path. Returns true if anything
+// was queued.
+function runDownload() {
   const urls = parseUrls(urlInput.value);
-  if (!urls.length) return;
+  if (!urls.length) return false;
 
   // Lock the button only while we kick off the requests, then clear the input
   // and unlock so more can be queued right away.
@@ -290,6 +333,48 @@ form.addEventListener("submit", async (e) => {
   urls.forEach((url) => submitOne(url));
 
   submitBtn.disabled = false;
+  return true;
+}
+
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  runDownload();
+});
+
+// ---------- auto-paste on focus ----------
+// When enabled, refocusing the page reads the clipboard, keeps only the url,
+// and starts the download automatically. Mirrors the persisted setting.
+let autoPasteOnFocus = false;
+// Remember the last clipboard text we acted on so switching tabs back and forth
+// doesn't re-download the same link on every refocus.
+let lastAutoPasted = "";
+
+async function autoPasteFromClipboard() {
+  if (!autoPasteOnFocus) return;
+  // Clipboard reads need a secure context (https/localhost) and browser
+  // permission. On a plain-http LAN address readText is unavailable or throws;
+  // we stay silent and let the user paste manually.
+  if (!navigator.clipboard || !navigator.clipboard.readText) return;
+
+  let text = "";
+  try {
+    text = await navigator.clipboard.readText();
+  } catch (e) {
+    return; // permission denied / not allowed — nothing to do
+  }
+
+  const urls = extractUrls(text);
+  if (!urls) return; // no link on the clipboard: leave the box untouched
+  if (text === lastAutoPasted) return; // already handled this clipboard content
+  lastAutoPasted = text;
+
+  urlInput.value = urls; // replace whatever was in the box
+  runDownload();
+}
+
+window.addEventListener("focus", autoPasteFromClipboard);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") autoPasteFromClipboard();
 });
 
 function renderHistory(items) {
@@ -482,6 +567,7 @@ const autoTranscodeEl = document.getElementById("auto-transcode");
 const transcodeTargetEl = document.getElementById("transcode-target");
 const maxHeightEl = document.getElementById("max-height");
 const stripTrackingEl = document.getElementById("strip-tracking");
+const autoPasteEl = document.getElementById("auto-paste");
 const settingsStatusEl = document.getElementById("settings-status");
 
 // The codec order lives here and is rendered as a reorderable list; the backend
@@ -529,6 +615,9 @@ function applySettings(settings, options) {
   stripTrackingEl.checked = settings.strip_tracking_params;
   stripTracking = settings.strip_tracking_params;
 
+  autoPasteEl.checked = settings.auto_paste_on_focus;
+  autoPasteOnFocus = settings.auto_paste_on_focus;
+
   transcodeTargetEl.innerHTML = options.transcode_targets
     .map((t) => `<option value="${t}">${t}</option>`)
     .join("");
@@ -557,6 +646,7 @@ settingsForm.addEventListener("submit", async (e) => {
     transcode_target: transcodeTargetEl.value,
     max_height: Math.max(0, parseInt(maxHeightEl.value, 10) || 0),
     strip_tracking_params: stripTrackingEl.checked,
+    auto_paste_on_focus: autoPasteEl.checked,
   };
   try {
     const res = await fetch("/api/settings", {
@@ -571,6 +661,7 @@ settingsForm.addEventListener("submit", async (e) => {
     renderCodecPriority();
     maxHeightEl.value = data.settings.max_height || 0;
     stripTracking = data.settings.strip_tracking_params;
+    autoPasteOnFocus = data.settings.auto_paste_on_focus;
     settingsStatusEl.textContent = "saved ✓ · applies to new downloads";
     setTimeout(() => (settingsStatusEl.textContent = ""), 4000);
   } catch (err) {
@@ -578,6 +669,21 @@ settingsForm.addEventListener("submit", async (e) => {
   }
 });
 
+// ---------- version footer ----------
+// The backend's APP_VERSION is the source of truth; refresh the footer from it
+// so the displayed version always matches the running server.
+async function loadVersion() {
+  try {
+    const res = await fetch("/api/version");
+    if (!res.ok) return;
+    const { version } = await res.json();
+    if (version) document.getElementById("app-version").textContent = `v${version}`;
+  } catch (e) {
+    // keep the HTML fallback version
+  }
+}
+
 loadSettings();
 loadHistory();
 loadStorage();
+loadVersion();

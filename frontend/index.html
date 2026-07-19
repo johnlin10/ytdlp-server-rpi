@@ -90,6 +90,12 @@
             <span class="set-desc"># auto-remove ?igsh=…, utm_*, fbclid… as you type</span>
           </label>
 
+          <label class="set-row set-inline">
+            <input type="checkbox" id="auto-paste" />
+            <span class="set-label">auto-paste &amp; download on focus</span>
+            <span class="set-desc"># on refocus: grab the url from the clipboard and run · needs https/localhost</span>
+          </label>
+
           <label class="set-row">
             <span class="set-label">download codec priority</span>
             <span class="set-desc"># preferred first; falls back down the list</span>
@@ -122,6 +128,21 @@
       </section>
     </div>
   </main>
+
+  <!-- Fallback version mirrors backend APP_VERSION; app.js refreshes it from
+       /api/version, which is the authoritative source. Bump both on release. -->
+  <footer class="site-footer">
+    <span class="foot-copy">© 2026 johnlin10</span>
+    <span class="foot-sep">·</span>
+    <a
+      class="foot-link"
+      href="https://github.com/johnlin10/ytdlp-server-rpi"
+      target="_blank"
+      rel="noopener"
+    >github.com/johnlin10/ytdlp-server-rpi</a>
+    <span class="foot-sep">·</span>
+    <span class="foot-version" id="app-version">v1.1.0</span>
+  </footer>
 
   <script src="app.js"></script>
 </body>

@@ -16,6 +16,8 @@ Python application and runs on any Linux / macOS system with Python 3 and ffmpeg
 - Parallel / batch downloads: paste several URLs at once separated by commas (or newlines); each runs in its own background thread with its own progress card.
 - Storage gauge: the history view shows how much space your downloads use against the total disk, with a terminal-style usage bar.
 - Responsive UI: the layout adapts to phones and narrow screens.
+- URL-only paste filter: pasting a social-media "share" blob (a caption/title with a link inside) keeps just the URL(s), so yt-dlp isn't handed non-URL text that would fail to resolve.
+- Auto-paste on focus (opt-in): when enabled in settings, refocusing the page reads the clipboard, keeps only the URL, and starts the download automatically — see [Auto-paste on focus](#auto-paste-on-focus-opt-in).
 - Auto-save: when a download finishes, the browser is prompted to save the mp4 to your device.
 - History: SQLite stores the title, original URL, filename, size, thumbnail and download time, with one-click delete (record + file).
 - No build step: the frontend is plain HTML/CSS/JS served directly by FastAPI, well suited to running for long periods on a Pi.
@@ -175,6 +177,41 @@ above, so a typo can't break downloads. Delete the file to return to defaults.
 > ffmpeg -i broken.mp4 -c:v libx264 -crf 23 -tag:v avc1 -c:a aac -movflags +faststart fixed.mp4
 > ```
 
+### Auto-paste on focus (opt-in)
+
+Enable **auto-paste & download on focus** in the settings panel and the page will,
+every time it regains focus (e.g. you switch back to the tab after copying a
+link), read your clipboard, keep only the URL, and start the download — no
+paste, no *run* click. It's off by default because it's an aggressive behaviour,
+and it de-dupes on the clipboard contents so flipping between tabs won't
+re-download the same link.
+
+**Requires a secure context.** Browsers only expose clipboard reading
+(`navigator.clipboard.readText`) over **HTTPS** or on `localhost`. On a plain
+`http://` LAN or Tailscale address the read is blocked, so auto-paste silently
+does nothing (you can still paste manually — the URL-only filter still applies).
+
+To get HTTPS with [Tailscale](https://tailscale.com), let **Tailscale Serve**
+terminate TLS with a valid certificate in front of the app — no code changes:
+
+1. In the Tailscale admin console → **DNS**, enable **MagicDNS** and **HTTPS
+   Certificates**.
+2. Find this machine's name with `tailscale status` (e.g.
+   `raspberrypi.tailXXXX.ts.net`).
+3. Put a persistent HTTPS proxy in front of port 8000:
+
+   ```bash
+   sudo tailscale serve --bg 8000
+   ```
+
+   `--bg` stores the config in `tailscaled`'s state, so it's restored
+   automatically on reboot (check with `tailscale serve status`).
+4. Open `https://raspberrypi.tailXXXX.ts.net/` (port 443, no `:8000`). This is a
+   valid-certificate secure context, so clipboard auto-paste works — on phones
+   and desktops alike. `tailscale serve` stays inside your tailnet (unlike
+   `funnel`), so it's no more exposed than the direct port. Turn it off with
+   `sudo tailscale serve --https=443 off`.
+
 ## Maintenance
 
 ### Updating
@@ -288,6 +325,14 @@ quick and actually pulls the latest yt-dlp. (A plain `docker compose build
 --pull` would *not* update yt-dlp: the `pip install` layer stays cached unless
 the base image digest happens to change that week.)
 
+### Versioning
+
+The project follows [semantic versioning](https://semver.org)
+(`MAJOR.MINOR.PATCH`). The version lives in one place — `APP_VERSION` in
+`backend/main.py` — and is served at `GET /api/version` and shown in the page
+footer. Each release bumps that constant, prefixes the commit subject with the
+version, and adds a matching `vX.Y.Z` git tag (`git tag -l` lists them).
+
 ### Storage
 
 mp4 files accumulate in `backend/downloads/`, so keep an eye on free space on
@@ -314,6 +359,7 @@ the service directly.
 | PUT    | `/api/settings`           | Update encoding preferences (partial updates allowed)   |
 | GET    | `/api/history`            | Get the download history list                           |
 | GET    | `/api/storage`            | Report downloads size and disk total/used/free          |
+| GET    | `/api/version`            | Report the running app version                          |
 | GET    | `/api/file/{video_id}`    | Download / re-download an existing mp4 file              |
 | GET    | `/api/download-zip`       | Stream the selected videos (`?ids=a,b,c`) as one `videos.zip` |
 | DELETE | `/api/history/{video_id}` | Delete a history record and remove the video file       |
