@@ -143,44 +143,66 @@ h1 {
 }
 
 /* ---------- tabs ---------- */
+.tabs-wrap {
+  margin-bottom: 22px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Vertical, terminal-style list: a '>' cursor marks the selected view, moved
+   with the mouse or the ↑/↓ keys. */
 .tabs {
   display: flex;
-  gap: 4px;
-  margin-bottom: 22px;
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  gap: 2px;
 }
 
 .tab {
   position: relative;
+  text-align: left;
   background: none;
   border: none;
   color: var(--text-dim);
   font-family: var(--font-mono);
   font-size: 13px;
-  padding: 8px 14px;
+  padding: 5px 8px 5px 24px; /* left gutter reserves room for the cursor */
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  border-radius: 4px;
 }
 
+/* Cursor gutter: space is always reserved so labels line up; only the active
+   row actually shows the '>'. */
 .tab::before {
-  content: "";
+  content: ">";
+  position: absolute;
+  left: 9px;
   color: var(--accent);
   opacity: 0;
 }
 
 .tab:hover {
   color: var(--text);
+  background: var(--surface-2);
+}
+
+.tab:focus-visible {
+  outline: 1px solid var(--accent-dim);
+  outline-offset: -1px;
 }
 
 .tab.is-active {
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  background: var(--surface-2);
 }
 
 .tab.is-active::before {
-  content: "> ";
   opacity: 1;
+}
+
+.tabs-hint {
+  margin: 9px 0 0;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 /* count of in-flight downloads, shown on the download tab when off-screen */
@@ -394,6 +416,24 @@ h1 {
 
 #url-input:focus {
   outline: none;
+}
+
+#paste-btn {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#paste-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-dim);
 }
 
 #submit-btn {

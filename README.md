@@ -10,14 +10,14 @@ Python application and runs on any Linux / macOS system with Python 3 and ffmpeg
 
 ## Features
 
-- Web UI: paste a URL, watch live download progress, and see finished files in the history list, organised into `download` / `history` / `settings` tabs so only one thing is on screen at a time.
+- Web UI: paste a URL, watch live download progress, and see finished files in the history list, organised into `download` / `history` / `settings` views so only one thing is on screen at a time. The views are a vertical, terminal-style list you switch by click or the ↑/↓ keys, and the current view is kept in the URL (`?tab=…`) so a refresh stays put.
 - Batch actions: select multiple files in the history list to delete them together, or download them as a single `videos.zip` — one browser download that works reliably on iOS/macOS instead of many blocked ones.
 - Deduplication: keyed by the video's `video_id`, so an already-downloaded video is returned from disk instead of being downloaded again.
 - Parallel / batch downloads: paste several URLs at once separated by commas (or newlines); each runs in its own background thread with its own progress card.
 - Storage gauge: the history view shows how much space your downloads use against the total disk, with a terminal-style usage bar.
 - Responsive UI: the layout adapts to phones and narrow screens.
 - URL-only paste filter: pasting a social-media "share" blob (a caption/title with a link inside) keeps just the URL(s), so yt-dlp isn't handed non-URL text that would fail to resolve.
-- Auto-paste on focus (opt-in): when enabled in settings, refocusing the page reads the clipboard, keeps only the URL, and starts the download automatically — see [Auto-paste on focus](#auto-paste-on-focus-opt-in).
+- Paste button: one tap reads the clipboard, keeps only the URL, strips tracking params and starts the download — a phone-friendly one-tap flow. Needs an HTTPS/localhost context for clipboard access — see [Paste button](#paste-button).
 - Auto-save: when a download finishes, the browser is prompted to save the mp4 to your device.
 - History: SQLite stores the title, original URL, filename, size, thumbnail and download time, with one-click delete (record + file).
 - No build step: the frontend is plain HTML/CSS/JS served directly by FastAPI, well suited to running for long periods on a Pi.
@@ -177,19 +177,22 @@ above, so a typo can't break downloads. Delete the file to return to defaults.
 > ffmpeg -i broken.mp4 -c:v libx264 -crf 23 -tag:v avc1 -c:a aac -movflags +faststart fixed.mp4
 > ```
 
-### Auto-paste on focus (opt-in)
+### Paste button
 
-Enable **auto-paste & download on focus** in the settings panel and the page will,
-every time it regains focus (e.g. you switch back to the tab after copying a
-link), read your clipboard, keep only the URL, and start the download — no
-paste, no *run* click. It's off by default because it's an aggressive behaviour,
-and it de-dupes on the clipboard contents so flipping between tabs won't
-re-download the same link.
+The input row has a **`paste`** button: tap it and the page reads your
+clipboard, keeps only the URL, strips tracking params, and starts the download
+in one go. Handy on a phone — copy a link, switch to the site, tap `paste`.
+
+It's a button (rather than firing automatically when the page regains focus)
+because Safari and iOS only allow reading the clipboard from a real user gesture
+(a tap/click); a focus event isn't a gesture, so an automatic read is rejected
+without even prompting. One tap is the most automatic the platform allows.
 
 **Requires a secure context.** Browsers only expose clipboard reading
 (`navigator.clipboard.readText`) over **HTTPS** or on `localhost`. On a plain
-`http://` LAN or Tailscale address the read is blocked, so auto-paste silently
-does nothing (you can still paste manually — the URL-only filter still applies).
+`http://` LAN or Tailscale address the API is unavailable, so the `paste` button
+hides itself (you can still paste manually with Cmd/Ctrl+V — the URL-only filter
+still applies).
 
 To get HTTPS with [Tailscale](https://tailscale.com), let **Tailscale Serve**
 terminate TLS with a valid certificate in front of the app — no code changes:
@@ -207,7 +210,7 @@ terminate TLS with a valid certificate in front of the app — no code changes:
    `--bg` stores the config in `tailscaled`'s state, so it's restored
    automatically on reboot (check with `tailscale serve status`).
 4. Open `https://raspberrypi.tailXXXX.ts.net/` (port 443, no `:8000`). This is a
-   valid-certificate secure context, so clipboard auto-paste works — on phones
+   valid-certificate secure context, so the `paste` button works — on phones
    and desktops alike. `tailscale serve` stays inside your tailnet (unlike
    `funnel`), so it's no more exposed than the direct port. Turn it off with
    `sudo tailscale serve --https=443 off`.

@@ -26,13 +26,16 @@
         <p class="comment"># yt-dlp download server · local network / raspberry pi</p>
       </header>
 
-      <nav class="tabs" role="tablist">
-        <button class="tab is-active" role="tab" data-tab="download" aria-selected="true">
-          download<span class="tab-badge" id="tab-badge" hidden></span>
-        </button>
-        <button class="tab" role="tab" data-tab="history" aria-selected="false">history</button>
-        <button class="tab" role="tab" data-tab="settings" aria-selected="false">settings</button>
-      </nav>
+      <div class="tabs-wrap">
+        <nav class="tabs" role="tablist" aria-orientation="vertical" aria-label="views">
+          <button class="tab is-active" role="tab" data-tab="download" aria-selected="true" tabindex="0">
+            download<span class="tab-badge" id="tab-badge" hidden></span>
+          </button>
+          <button class="tab" role="tab" data-tab="history" aria-selected="false" tabindex="-1">history</button>
+          <button class="tab" role="tab" data-tab="settings" aria-selected="false" tabindex="-1">settings</button>
+        </nav>
+        <p class="tabs-hint"># ↑/↓ or click to switch view</p>
+      </div>
 
       <section class="tab-panel is-active" data-panel="download" role="tabpanel">
         <form id="download-form" class="input-row">
@@ -45,6 +48,7 @@
             spellcheck="false"
             required
           />
+          <button type="button" id="paste-btn" title="paste a link from the clipboard and download">paste</button>
           <button type="submit" id="submit-btn">run</button>
         </form>
 
@@ -88,12 +92,6 @@
             <input type="checkbox" id="strip-tracking" />
             <span class="set-label">strip tracking params from urls</span>
             <span class="set-desc"># auto-remove ?igsh=…, utm_*, fbclid… as you type</span>
-          </label>
-
-          <label class="set-row set-inline">
-            <input type="checkbox" id="auto-paste" />
-            <span class="set-label">auto-paste &amp; download on focus</span>
-            <span class="set-desc"># on refocus: grab the url from the clipboard and run · needs https/localhost</span>
           </label>
 
           <label class="set-row">
@@ -141,7 +139,7 @@
       rel="noopener"
     >github.com/johnlin10/ytdlp-server-rpi</a>
     <span class="foot-sep">·</span>
-    <span class="foot-version" id="app-version">v1.1.1</span>
+    <span class="foot-version" id="app-version">v1.2.0</span>
   </footer>
 
   <script src="app.js"></script>

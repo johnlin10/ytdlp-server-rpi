@@ -6,24 +6,71 @@ const jobsContainer = document.getElementById("jobs");
 const historyLog = document.getElementById("history-log");
 
 // ---------- tab navigation ----------
-const tabButtons = document.querySelectorAll(".tab");
+// A vertical, terminal-style list (see .tabs in the CSS): click or use the ↑/↓
+// keys to move the selection between views. The active view is mirrored to the
+// URL (?tab=…) so a refresh restores it.
+const tabButtons = Array.from(document.querySelectorAll(".tab"));
 const tabPanels = document.querySelectorAll(".tab-panel");
+const TAB_NAMES = tabButtons.map((b) => b.dataset.tab);
 
-function switchTab(name) {
+function activeTabName() {
+  const active = tabButtons.find((b) => b.classList.contains("is-active"));
+  return active ? active.dataset.tab : TAB_NAMES[0];
+}
+
+function switchTab(name, { focus = false, updateUrl = true } = {}) {
+  if (!TAB_NAMES.includes(name)) name = TAB_NAMES[0];
+
   tabButtons.forEach((b) => {
     const active = b.dataset.tab === name;
     b.classList.toggle("is-active", active);
     b.setAttribute("aria-selected", active ? "true" : "false");
+    // Roving tabindex: only the selected tab stays in the tab order.
+    b.tabIndex = active ? 0 : -1;
+    if (active && focus) b.focus();
   });
   tabPanels.forEach((p) => {
     p.hidden = p.dataset.panel !== name;
   });
+
+  if (updateUrl) {
+    const params = new URLSearchParams(location.search);
+    params.set("tab", name);
+    history.replaceState(null, "", `${location.pathname}?${params}${location.hash}`);
+  }
   refreshJobsUi();
+}
+
+// Move the selection `delta` steps (clamped to the ends), like moving up/down a
+// terminal menu.
+function moveTab(delta, opts) {
+  const current = TAB_NAMES.indexOf(activeTabName());
+  const next = Math.min(TAB_NAMES.length - 1, Math.max(0, current + delta));
+  if (next !== current) switchTab(TAB_NAMES[next], opts);
 }
 
 tabButtons.forEach((b) =>
   b.addEventListener("click", () => switchTab(b.dataset.tab))
 );
+
+// ↑/↓ switch views. Left alone while typing in a field or with a modifier held,
+// so normal text editing and browser/OS shortcuts still work.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+            t.tagName === "SELECT" || t.isContentEditable)) return;
+  e.preventDefault();
+  moveTab(e.key === "ArrowDown" ? 1 : -1, { focus: true });
+});
+
+// Restore the tab named in ?tab= on load (called from the init block at the
+// bottom, once refreshJobsUi's dependencies exist).
+function initTabFromUrl() {
+  const wanted = new URLSearchParams(location.search).get("tab");
+  switchTab(TAB_NAMES.includes(wanted) ? wanted : activeTabName(), { updateUrl: false });
+}
 
 // Badge on the download tab: how many jobs are still running while you're on
 // another tab, so progress isn't invisible after you switch away.
@@ -318,8 +365,8 @@ function parseUrls(raw) {
 
 // Kick off downloads for whatever's in the box. parseUrls applies the
 // tracking-param strip per token, so "strip then download" happens here for
-// both the manual run button and the auto-paste path. Returns true if anything
-// was queued.
+// both the run button and the paste button. Returns true if anything was
+// queued.
 function runDownload() {
   const urls = parseUrls(urlInput.value);
   if (!urls.length) return false;
@@ -341,40 +388,42 @@ form.addEventListener("submit", (e) => {
   runDownload();
 });
 
-// ---------- auto-paste on focus ----------
-// When enabled, refocusing the page reads the clipboard, keeps only the url,
-// and starts the download automatically. Mirrors the persisted setting.
-let autoPasteOnFocus = false;
-// Remember the last clipboard text we acted on so switching tabs back and forth
-// doesn't re-download the same link on every refocus.
-let lastAutoPasted = "";
+// ---------- paste button ----------
+// One tap: read the clipboard, keep only the url, strip tracking params and
+// start the download. The click is the user gesture Safari (and iOS) require to
+// read the clipboard — a `focus`/`visibilitychange` handler isn't a gesture and
+// would be rejected without even prompting, which is why this is a button.
+const pasteBtn = document.getElementById("paste-btn");
 
-async function autoPasteFromClipboard() {
-  if (!autoPasteOnFocus) return;
-  // Clipboard reads need a secure context (https/localhost) and browser
-  // permission. On a plain-http LAN address readText is unavailable or throws;
-  // we stay silent and let the user paste manually.
-  if (!navigator.clipboard || !navigator.clipboard.readText) return;
+// Clipboard reads need a secure context (https/localhost); hide the button
+// where the API is unavailable so it never looks broken.
+if (!navigator.clipboard || !navigator.clipboard.readText) {
+  pasteBtn.hidden = true;
+}
 
+// Briefly show a status on the button itself (no url / denied), then restore.
+function flashPaste(label) {
+  pasteBtn.textContent = label;
+  setTimeout(() => (pasteBtn.textContent = "paste"), 1500);
+}
+
+pasteBtn.addEventListener("click", async () => {
   let text = "";
   try {
     text = await navigator.clipboard.readText();
   } catch (e) {
-    return; // permission denied / not allowed — nothing to do
+    flashPaste("denied"); // permission refused / not allowed
+    return;
   }
 
   const urls = extractUrls(text);
-  if (!urls) return; // no link on the clipboard: leave the box untouched
-  if (text === lastAutoPasted) return; // already handled this clipboard content
-  lastAutoPasted = text;
+  if (!urls) {
+    flashPaste("no url");
+    return;
+  }
 
   urlInput.value = urls; // replace whatever was in the box
-  runDownload();
-}
-
-window.addEventListener("focus", autoPasteFromClipboard);
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") autoPasteFromClipboard();
+  runDownload(); // parseUrls strips tracking params before the request
 });
 
 function renderHistory(items) {
@@ -567,7 +616,6 @@ const autoTranscodeEl = document.getElementById("auto-transcode");
 const transcodeTargetEl = document.getElementById("transcode-target");
 const maxHeightEl = document.getElementById("max-height");
 const stripTrackingEl = document.getElementById("strip-tracking");
-const autoPasteEl = document.getElementById("auto-paste");
 const settingsStatusEl = document.getElementById("settings-status");
 
 // The codec order lives here and is rendered as a reorderable list; the backend
@@ -615,9 +663,6 @@ function applySettings(settings, options) {
   stripTrackingEl.checked = settings.strip_tracking_params;
   stripTracking = settings.strip_tracking_params;
 
-  autoPasteEl.checked = settings.auto_paste_on_focus;
-  autoPasteOnFocus = settings.auto_paste_on_focus;
-
   transcodeTargetEl.innerHTML = options.transcode_targets
     .map((t) => `<option value="${t}">${t}</option>`)
     .join("");
@@ -646,7 +691,6 @@ settingsForm.addEventListener("submit", async (e) => {
     transcode_target: transcodeTargetEl.value,
     max_height: Math.max(0, parseInt(maxHeightEl.value, 10) || 0),
     strip_tracking_params: stripTrackingEl.checked,
-    auto_paste_on_focus: autoPasteEl.checked,
   };
   try {
     const res = await fetch("/api/settings", {
@@ -661,7 +705,6 @@ settingsForm.addEventListener("submit", async (e) => {
     renderCodecPriority();
     maxHeightEl.value = data.settings.max_height || 0;
     stripTracking = data.settings.strip_tracking_params;
-    autoPasteOnFocus = data.settings.auto_paste_on_focus;
     settingsStatusEl.textContent = "saved ✓ · applies to new downloads";
     setTimeout(() => (settingsStatusEl.textContent = ""), 4000);
   } catch (err) {
@@ -683,6 +726,7 @@ async function loadVersion() {
   }
 }
 
+initTabFromUrl();
 loadSettings();
 loadHistory();
 loadStorage();

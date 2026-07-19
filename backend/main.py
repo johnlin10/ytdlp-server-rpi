@@ -63,7 +63,7 @@ app = FastAPI(title="ytdlp-server-rpi")
 # Single source of truth for the app version (semantic versioning). Bump this on
 # each release together with the git commit prefix / tag; the frontend footer
 # reads it from /api/version so it never needs a separate edit.
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 
 # ---------- Encoding preferences ----------
 # These control which video codec yt-dlp is asked to prefer, and whether a
@@ -102,11 +102,6 @@ DEFAULT_SETTINGS = {
     # typed/pasted into the box. Purely a UI convenience; the frontend applies
     # it, this flag just persists the preference across devices.
     "strip_tracking_params": True,
-    # When the page (re)gains focus, read the clipboard, keep only the URL(s),
-    # drop them in the box and start the download automatically. Off by default
-    # since it's aggressive; also needs a secure context (https/localhost) for
-    # the browser to allow clipboard reads. Frontend-only convenience flag.
-    "auto_paste_on_focus": False,
 }
 
 _settings_lock = threading.Lock()
@@ -136,9 +131,6 @@ def _coerce_settings(raw: dict) -> dict:
 
     if isinstance(raw.get("strip_tracking_params"), bool):
         s["strip_tracking_params"] = raw["strip_tracking_params"]
-
-    if isinstance(raw.get("auto_paste_on_focus"), bool):
-        s["auto_paste_on_focus"] = raw["auto_paste_on_focus"]
 
     if raw.get("transcode_target") in TRANSCODE_ENCODERS:
         s["transcode_target"] = raw["transcode_target"]
@@ -266,7 +258,6 @@ class SettingsUpdate(BaseModel):
     transcode_target: Optional[str] = None
     max_height: Optional[int] = None
     strip_tracking_params: Optional[bool] = None
-    auto_paste_on_focus: Optional[bool] = None
 
 
 # ---------- Helpers ----------
